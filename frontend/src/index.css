@@ -1,0 +1,55 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 33% 17%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 70% 35%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 85%;
+    --ring: 222 47% 11%;
+    --radius: 0.25rem;
+  }
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Plus Jakarta Sans", -apple-system, sans-serif;
+  }
+  h1, h2, h3, h4, .font-heading { font-family: "Outfit", "Plus Jakarta Sans", sans-serif; }
+  :focus-visible { outline: 2px solid #0f172a; outline-offset: 2px; }
+}
+
+@layer components {
+  .container-x { @apply mx-auto w-full max-w-7xl px-5 sm:px-8; }
+  .eyebrow { @apply text-xs font-semibold uppercase tracking-[0.18em] text-slate-500; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-sm px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-dark { @apply btn bg-slate-900 text-white hover:bg-slate-700; }
+  .btn-line { @apply btn border border-slate-300 bg-white text-slate-800 hover:bg-slate-50; }
+  .btn-sm { @apply px-3 py-1.5 text-xs; }
+  .inp { @apply w-full rounded-sm border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900; }
+  .lbl { @apply mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-500; }
+  .panel { @apply border border-slate-200 bg-white; }
+  .tbl th { @apply border-b border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap; }
+  .tbl td { @apply border-b border-slate-100 px-3 py-2.5 text-sm text-slate-700 align-top; }
+  .prose-legal h2 { @apply mt-8 mb-2 text-lg font-semibold text-slate-900; }
+  .prose-legal p, .prose-legal li { @apply text-sm leading-relaxed text-slate-600; }
+}
+
+.fade-up { animation: fadeUp 0.5s ease-out both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
