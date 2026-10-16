@@ -183,9 +183,15 @@ async def _lease_for_write(lid, user):
 @router.post("/leases/{lid}/rent")
 async def record_rent(lid: str, body: RentIn, user=Depends(require("leases", "w"))):
     lease = await _lease_for_write(lid, user)
+    if await db.rent_payments.find_one({"idempotency_key": body.idempotency_key}):
+        raise HTTPException(409, "This rent payment was already recorded")
+    if lease["status"] != "active":
+        raise HTTPException(422, "Rent can only be recorded on an active lease")
     sched = next((s for s in lease["schedule"] if s["period"] == body.period), None)
     if not sched:
         raise HTTPException(422, "Period is outside the lease schedule")
+    if sched["paid"] + body.amount > sched["amount"] + 0.001:
+        raise HTTPException(422, f"Amount exceeds the balance due for {body.period}")
     p = {"id": new_id(), "lease_id": lid, "lease_code": lease["code"], "owner_id": lease.get("owner_id"),
          "property_id": lease["property_id"], "mgmt_fee_pct": lease["mgmt_fee_pct"], **body.model_dump(),
          "receipt_no": await next_code("rent_receipt", "RR-", 5), "by": user["id"], "created_at": now_iso()}

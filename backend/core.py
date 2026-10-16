@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import uuid
 import time
 import logging
@@ -117,7 +118,8 @@ def normalize_phone(raw: str) -> str:
 
 def client_ip(request: Request) -> str:
     fwd = request.headers.get("x-forwarded-for")
-    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
+    # right-most entry is the one appended by our trusted ingress; left-most values are client-controlled
+    return fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "unknown")
 
 
 _rate: dict = {}
@@ -181,7 +183,7 @@ def scope(user, module):
     if field:
         f[field] = user["id"]
     if user["role"] == "branch_manager" and user.get("branch_ids") and module in BRANCH_SCOPED:
-        f["branch_id"] = {"$in": user["branch_ids"]}
+        f["branch_id"] = {"$in": user["branch_ids"] + [None]}
     return f
 
 
@@ -261,6 +263,6 @@ async def save_upload(file: UploadFile, allowed=DOC_TYPES, max_bytes=10 * 1024 *
     if not data or not any(data.startswith(m) for m in MAGIC[ctype]):
         raise HTTPException(422, "File content does not match its type")
     stored = new_id()
-    (UPLOAD_DIR / stored).write_bytes(data)
+    await asyncio.to_thread((UPLOAD_DIR / stored).write_bytes, data)
     return {"stored_name": stored, "size": len(data), "content_type": ctype,
             "original_name": re.sub(r"[^\w.\- ]", "_", file.filename or "file")[:120]}

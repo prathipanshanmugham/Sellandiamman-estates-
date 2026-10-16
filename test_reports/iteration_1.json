@@ -1,0 +1,63 @@
+{
+  "summary": "First full run (backend + frontend) on the public https URL. Backend: 17 pytest E2E tests in /app/backend/tests/test_erp_e2e.py, 16 passed and 1 skipped on the first good run. The skipped test (approvals) passes after a fixture fix, so 17/17 now pass. Covered: auth (httpOnly+Secure cookie, logout revokes the session), anonymous 401/403/404, public field privacy, enquiry + dedupe, owner submission, agent scope, property verify/publish gating, deal commission/close/invoice with 409/422 guards, payment idempotency and overpayment, lease rent going to owner_funds, owner statement settle (409 on repeat), work order flow, short-stay overlap/settle, RBAC denials, commission-change approval (self-approve 403). Frontend: one CRITICAL blocker found and fixed in config. CORS_ORIGINS in backend/.env did not list the current preview origin, so the server's Origin check rejected EVERY browser POST from the public site (enquiry form showed 'Origin not allowed'). That would also break ERP login and all writes. After the fix, these work in the UI: home hero search -> catalogue with filters, sort, grid/list; property detail; enquiry; owner submission (declaration error shown); admin/agent login; agent sees only own leads; call activity sets stage to contacted; site visit; stage change; verify -> ready_to_market -> publish -> public page; convert lead -> offer -> accept -> commission preview with split -> close -> generate invoice; record payment, with an overpay error shown in the dialog; booking create with live preview, then check-in; Access restricted page; logout gives /me 401.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "ALL POST/PUT/PATCH/DELETE (server.py origin middleware)", "issue": "CORS_ORIGINS did not include the current preview host https://estates-portal-1.preview.emergentagent.com, so every browser write returned 403 'Origin not allowed'. Fixed by the tester in backend/.env. The main agent must make sure production/custom domains are added too, or derive the value from config.", "priority": "CRITICAL"},
+      {"endpoint": "core.client_ip / rate_limit / login lockout", "issue": "The server trusts the FIRST X-Forwarded-For value, which the client controls. Sending a random 'X-Forwarded-For' header bypasses the 5-failure brute-force lockout (key is ip+email), the login rate limit and the public form limits. Verified: login returned 429 normally and 200 with a spoofed XFF. Use the last hop added by the trusted proxy (or the right-most untrusted entry), and also lock out per email regardless of IP.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "Global 20 logins per 5 min per IP. Staff in one office behind a single NAT will hit 429; the test suite hit it after about 10 logins."},
+      {"endpoint": "POST /api/invoices/{id}/credit-note", "issue": "A non-refund credit only checks credited+amount<=total and ignores paid. On a fully paid invoice, paid+credited can exceed total."},
+      {"endpoint": "POST /api/leases/{id}/rent", "issue": "No check on lease status (an ended lease can receive rent) and no check for overpaying a period."},
+      {"endpoint": "POST /api/leads/{id}/convert, POST /api/deals", "issue": "The property is not checked against the caller's scope. A sales agent can create a deal on any property."},
+      {"endpoint": "Branch scoping", "issue": "Records created by super_admin get no branch_id (the admin has no branch_ids), so branch managers can never see those deals or properties."},
+      {"endpoint": "POST /api/approvals/{id}/decide", "issue": "Status is set to approved BEFORE the action runs. A non-HTTP exception leaves it approved but not applied."},
+      {"endpoint": "POST /api/deals/{id}/invoice, POST /api/bookings", "issue": "Check-then-insert: duplicate-invoice and overlap checks are not atomic, so concurrent requests could race."},
+      {"endpoint": "POST /api/public/owner-submission", "issue": "If the phone matches an existing owner, the submission is attached to that owner with no verification. Category is free text (not validated against CATEGORIES)."},
+      {"endpoint": "core.save_upload", "issue": "Uses a synchronous write_bytes inside an async handler."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Leases.jsx rent/deposit dialogs", "issue": "idempotency_key is generated as uid() inside onSubmit, so a retry after a network error or timeout sends a NEW key and can record the rent or deposit twice. Generate it once per dialog open, as Finance.jsx already does.", "selector": "[data-testid^=record-rent-], [data-testid=deposit-in-btn]", "priority": "MEDIUM"},
+      {"component": "Sonner toasts (top-right)", "issue": "Toasts sit over the page header action buttons (Generate invoice, Close deal, etc.) and block clicks for several seconds after each action.", "selector": "[data-sonner-toast]", "priority": "MEDIUM"},
+      {"component": "EnquiryForm", "issue": "No client-side check for an Indian mobile number. The raw pydantic message 'phone: String should have at least 10 characters' is shown to visitors.", "selector": "[data-testid=property-enquiry-error]", "priority": "LOW"},
+      {"component": "PropertyDetail (public)", "issue": "A published listing with no approved photos shows a stock house photo as its main image, which can mislead visitors. Show a neutral placeholder instead.", "selector": "[data-testid=property-main-image]", "priority": "LOW"},
+      {"component": "DealDetail checklist", "issue": "'Commission agreement signed' checklist item stays unchecked even when commission.agreement_signed is true.", "selector": "[data-testid=checklist-0]", "priority": "LOW"},
+      {"component": "LeadDetail", "issue": "The Schedule visit dialog does not default to the lead's enquired property. Stage can be moved backwards (site_visit -> qualified) with no warning. The empty enquiry message shows as '[enquiry]'.", "selector": "[data-testid=schedule-visit-btn]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Deal -> invoice", "issue": "Accountant (finance:w) cannot generate an invoice from a won deal (the button is hidden; the API needs deals:w). Only admin, director, branch manager and agent can invoice. Confirm this is intended.", "affected_selectors": ["[data-testid=generate-invoice-btn]"]}
+    ],
+    "design_issues": [
+      {"screen": "Catalogue grid", "issues": ["Card images render as blank grey boxes until lazy-loaded; check the first-paint loading state."]},
+      {"screen": "Enquiry consent label", "issues": ["The 'privacy policy' link wraps into a separate right-aligned column, with a stray '.' after it."]},
+      {"screen": "Property publish", "issues": ["Publish is allowed to be clicked with no public description and only then shows an error. Show the requirement before the click."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_erp_e2e.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Keep CORS_ORIGINS in sync with every deployed host (the preview host was missing). Consider failing loudly at startup or logging the rejected origin.",
+    "Fix client_ip to stop trusting the client-supplied first X-Forwarded-For entry. Add a per-email lockout that does not depend on IP.",
+    "Leases.jsx: generate idempotency_key once per dialog open for rent and deposit.",
+    "Move the toast position, or give header actions a z-index, so toasts do not block buttons.",
+    "Add client-side Indian mobile validation with friendly error messages on the enquiry and owner forms.",
+    "Guard credit notes against paid+credited>total. Block rent on ended leases.",
+    "Scope-check property_id in convert/create deal for sales agents.",
+    "Sync the deal checklist 'Commission agreement signed' item with commission.agreement_signed."
+  ],
+  "critical_code_review_comments": [
+    "routes_admin.py (522 lines) and routes_ops.py (516 lines) are close to the size limit; split by domain.",
+    "The rate limiter is in-memory per process. Limits reset on restart and are not shared across workers.",
+    "The approval decide flow is not transactional (status updated before the side effect).",
+    "Booking overlap and the single-invoice-per-deal check rely on find-then-insert with no unique index or lock."
+  ],
+  "updated_files": ["/app/backend/.env (added https://estates-portal-1.preview.emergentagent.com to CORS_ORIGINS, existing values preserved)", "/app/backend/tests/test_erp_e2e.py"],
+  "success_rate": {"backend": "100% (17/17 E2E flows pass; 2 security/config issues found)", "frontend": "~90% of tested flows pass after the CORS fix"},
+  "seed_data_creation": "Created TEST_-prefixed records: leads (TEST_Visitor, TEST_UI Visitor SE-LD-00011), owner-submitted properties (TEST_Locality, SE-P-0016 / SEL-00011 published), TEST_Landlord owners with rent properties and leases, deals (incl. SE-D-0006 won + invoice with Rs.100 payment), vendors, work orders, bookings SE-B-00001..00004 on SE-P-0007 (SE-B-00004 left checked_in).",
+  "test_credentials": "From /app/memory/test_credentials.md. Admin and all demo users worked.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: REACT_APP_BACKEND_URL=... pytest /app/backend/tests/test_erp_e2e.py -n 0 (pytest.ini enables xdist, but the tests share state and must run serially). The tests send a random X-Forwarded-For to avoid the shared login/public-form rate limits; this only works because of the XFF trust bug, so revise the fixture once that is fixed. Untested in the UI: lease creation, owner statement settle, the maintenance UI flow, short-stay checkout/settle, and the approvals UI. All of these are covered by the API tests. Booking dialog closes after each action (re-open the row to continue).",
+  "rca of the issue": "Enquiry submit showed 'Origin not allowed'. Cause: the middleware in server.py rejects state-changing requests whose Origin header is not in CORS_ORIGINS, and backend/.env CORS_ORIGINS only listed the old preview host (e49e0683-...) and localhost. Reproduce: POST /api/public/enquiry from https://estates-portal-1.preview.emergentagent.com returns 403. Mitigation: added the host to CORS_ORIGINS and restarted the backend. Verified: login and enquiry POST now succeed from the browser."
+}

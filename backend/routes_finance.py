@@ -24,7 +24,7 @@ async def create_invoice_doc(data, user):
         calc = calc_invoice(data["lines"], s.get("gst_rate", 0), s.get("gst_enabled", False))
     except ValueError as e:
         raise HTTPException(422, str(e))
-    if data.get("deal_id") and await db.invoices.find_one({"deal_id": data["deal_id"], "status": {"$ne": "void"}}):
+    if data.get("deal_id") and await db.invoices.find_one({"deal_id": data["deal_id"]}):
         raise HTTPException(409, "An invoice already exists for this deal")
     t = today_ist()
     inv = {"id": new_id(), "number": await next_code(f"inv-{fy(t)}", f"SE/{fy(t)}/", 4), "type": data["type"],
@@ -33,7 +33,10 @@ async def create_invoice_doc(data, user):
            "issue_date": t.isoformat(), "due_date": (t + timedelta(days=int(s.get("invoice_due_days", 15)))).isoformat(),
            "deal_id": data.get("deal_id"), "booking_id": data.get("booking_id"), "owner_id": data.get("owner_id"),
            "notes": data.get("notes"), "created_by": user["id"], "created_at": now_iso()}
-    await db.invoices.insert_one(dict(inv))
+    try:
+        await db.invoices.insert_one(dict(inv))
+    except DuplicateKeyError:
+        raise HTTPException(409, "An invoice already exists for this deal")
     await audit(user, "invoice_issued", "finance", inv["id"], {"total": inv["total"], "number": inv["number"]})
     return inv
 
@@ -139,12 +142,13 @@ async def record_payment(iid: str, body: PaymentIn, user=Depends(require("financ
 
 async def apply_credit_note(inv, payload, user):
     amount = float(payload["amount"])
+    used = "$credited" if payload.get("refund") else {"$add": ["$credited", "$paid"]}
     r = await db.invoices.update_one(
         {"id": inv["id"], "status": {"$ne": "void"},
-         "$expr": {"$lte": [{"$add": ["$credited", amount]}, {"$add": ["$total", 0.001]}]}},
+         "$expr": {"$lte": [{"$add": [used, amount]}, {"$add": ["$total", 0.001]}]}},
         {"$inc": {"credited": amount}})
     if not r.modified_count:
-        raise HTTPException(422, "Credit exceeds invoice total")
+        raise HTTPException(422, "Credit exceeds the invoice's outstanding amount")
     cn = {"id": new_id(), "number": await next_code("credit", "CN-", 5), "invoice_id": inv["id"], **payload,
           "by": user["id"], "created_at": now_iso()}
     await db.credit_notes.insert_one(dict(cn))

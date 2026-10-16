@@ -292,7 +292,7 @@ async def update_visit(vid: str, body: VisitPatch, user=Depends(require("leads",
 @router.post("/leads/{lid}/convert")
 async def convert_lead(lid: str, body: ConvertIn, user=Depends(require("deals", "w"))):
     lead = await get_scoped("leads", "leads", user, lid)
-    prop = await db.properties.find_one({"id": body.property_id, "deleted": {"$ne": True}}, {"_id": 0})
+    prop = await db.properties.find_one({"id": body.property_id, "deleted": {"$ne": True}, **scope(user, "properties")}, {"_id": 0})
     if not prop:
         raise HTTPException(404, "Property not found")
     owner = await db.owners.find_one({"id": prop.get("owner_id")}, {"_id": 0, "name": 1}) or {}

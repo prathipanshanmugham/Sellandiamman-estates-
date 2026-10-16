@@ -63,7 +63,10 @@ async def apply_commission(deal, payload, user):
                            payload.get("splits"))
     com = {"rule": {"type": payload["type"], "value": payload["value"]}, "payer": payload["payer"],
            "agreement_signed": payload.get("agreement_signed", False), **calc, "set_by": user["name"], "at": now_iso()}
-    await db.deals.update_one({"id": deal["id"]}, {"$set": {"commission": com, "expected_commission": calc["gross"]},
+    sets = {"commission": com, "expected_commission": calc["gross"]}
+    if com["agreement_signed"]:
+        sets["checklist.0.done"] = True
+    await db.deals.update_one({"id": deal["id"]}, {"$set": sets,
                                                    "$push": {"history": {"at": now_iso(), "by": user["name"],
                                                                          "event": f"Commission set: {inr(calc['gross'])}"}}})
     await audit(user, "commission_set", "deals", deal["id"], {"gross": calc["gross"], "rule": com["rule"]})
@@ -80,7 +83,7 @@ async def list_deals(stage: Optional[str] = None, user=Depends(require("deals", 
 
 @router.post("/deals")
 async def create_deal(body: DealIn, user=Depends(require("deals", "w"))):
-    prop = await db.properties.find_one({"id": body.property_id, "deleted": {"$ne": True}}, {"_id": 0})
+    prop = await db.properties.find_one({"id": body.property_id, "deleted": {"$ne": True}, **scope(user, "properties")}, {"_id": 0})
     if not prop:
         raise HTTPException(404, "Property not found")
     if body.lead_id:
@@ -241,7 +244,9 @@ async def cancel_deal(did: str, body: CancelIn, user=Depends(require("deals", "w
 
 
 @router.post("/deals/{did}/invoice")
-async def deal_invoice(did: str, user=Depends(require("deals", "w"))):
+async def deal_invoice(did: str, user=Depends(require("deals", "r"))):
+    if not (can(user, "deals", "w") or can(user, "finance", "w")):
+        raise HTTPException(403, "You do not have permission for this action")
     d = await get_scoped("deals", "deals", user, did)
     if d["stage"] != "won":
         raise HTTPException(422, "Only closed deals can be invoiced")

@@ -55,23 +55,24 @@ def _cookie(response: Response, token: str):
 
 @router.post("/auth/login")
 async def login(body: LoginIn, request: Request, response: Response):
-    rate_limit(request, "login", 20, 300)
+    rate_limit(request, "login", 60, 300)
     email = body.email.strip().lower()
     ident = f"{client_ip(request)}:{email}"
-    att = await db.login_attempts.find_one({"identifier": ident})
-    if att and att["last"] < now() - timedelta(minutes=15):
-        await db.login_attempts.delete_one({"identifier": ident})
-        att = None
-    if att and att.get("count", 0) >= 5:
-        raise HTTPException(429, "Too many failed attempts. Try again in 15 minutes.")
+    for key, limit in ((ident, 5), (f"email:{email}", 20)):
+        att = await db.login_attempts.find_one({"identifier": key})
+        if att and att["last"] < now() - timedelta(minutes=15):
+            await db.login_attempts.delete_one({"identifier": key})
+        elif att and att.get("count", 0) >= limit:
+            raise HTTPException(429, "Too many failed attempts. Try again in 15 minutes.")
     user = await db.users.find_one({"email": email})
     if not user or not user.get("password_hash") or not verify_password(body.password, user["password_hash"]):
-        await db.login_attempts.update_one({"identifier": ident}, {"$inc": {"count": 1}, "$set": {"last": now()}},
-                                           upsert=True)
+        for key in (ident, f"email:{email}"):
+            await db.login_attempts.update_one({"identifier": key}, {"$inc": {"count": 1}, "$set": {"last": now()}},
+                                               upsert=True)
         raise HTTPException(401, "Invalid email or password")
     if not user.get("active"):
         raise HTTPException(403, "This account is not active")
-    await db.login_attempts.delete_one({"identifier": ident})
+    await db.login_attempts.delete_many({"identifier": {"$in": [ident, f"email:{email}"]}})
     sid = secrets.token_urlsafe(24)
     await db.sessions.insert_one({"sid": sid, "user_id": user["id"], "created_at": now(), "revoked": False,
                                   "expires_at": now() + timedelta(hours=SESSION_HOURS), "ip": client_ip(request)})

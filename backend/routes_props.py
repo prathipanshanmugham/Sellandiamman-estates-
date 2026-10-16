@@ -138,6 +138,8 @@ async def create_prop(body: PropertyIn, user=Depends(require("properties", "w"))
         data["assigned_agent"] = user["id"]
     if not data.get("branch_id") and user.get("branch_ids"):
         data["branch_id"] = user["branch_ids"][0]
+    if not data.get("branch_id"):
+        data["branch_id"] = {"erode": "br-erode", "perundurai": "br-perundurai"}.get(body.city.strip().lower())
     p = {"id": new_id(), "code": await next_code("property", "SE-P-"), **data, "status": "draft",
          "verification": {"status": "not_started"}, "authorization": {}, "publication_history": [],
          "featured": False, "listing_id": None, "created_by": user["id"], "created_at": now_iso(),

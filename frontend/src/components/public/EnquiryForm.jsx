@@ -14,6 +14,9 @@ export default function EnquiryForm({ listingId, kind = "enquiry", defaultIntere
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const submit = async (e) => {
     e.preventDefault();
+    if (f.name.trim().length < 2) return setState({ loading: false, error: "Please enter your name.", ref: "" });
+    if (!/^(\+?91)?[6-9]\d{9}$/.test(f.phone.replace(/[\s\-()]/g, ""))) return setState({ loading: false, error: "Enter a valid 10-digit Indian mobile number.", ref: "" });
+    if (!f.consent) return setState({ loading: false, error: "Please accept the privacy policy to continue.", ref: "" });
     setState({ loading: true, error: "", ref: "" });
     try {
       const { data } = await api.post("/public/enquiry", { ...f, email: f.email || null, listing_id: listingId, kind, ...utm() });
@@ -44,7 +47,7 @@ export default function EnquiryForm({ listingId, kind = "enquiry", defaultIntere
       </div>
       {kind === "callback" && <div><label className="lbl">Preferred time</label><input className="inp" placeholder="e.g. Weekdays after 5 PM" value={f.preferred_time} onChange={set("preferred_time")} data-testid={`${testid}-time-input`} /></div>}
       <div><label className="lbl">Message</label><textarea rows={3} className="inp" value={f.message} onChange={set("message")} data-testid={`${testid}-message-input`} /></div>
-      <label className="flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" checked={f.consent} onChange={set("consent")} className="mt-0.5" data-testid={`${testid}-consent-checkbox`} />I agree to be contacted about this enquiry and accept the <Link to="/legal/privacy" className="underline">privacy policy</Link>.</label>
+      <label className="flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" checked={f.consent} onChange={set("consent")} className="mt-0.5" data-testid={`${testid}-consent-checkbox`} /><span>I agree to be contacted about this enquiry and accept the <Link to="/legal/privacy" className="underline">privacy policy</Link>.</span></label>
       <label className="flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" checked={f.marketing_consent} onChange={set("marketing_consent")} className="mt-0.5" data-testid={`${testid}-marketing-checkbox`} />Send me new listings and updates (optional).</label>
       {state.error && <p className="text-sm text-red-700" role="alert" data-testid={`${testid}-error`}>{state.error}</p>}
       <button className="btn-dark w-full" disabled={state.loading} data-testid={`${testid}-submit-btn`}>{state.loading ? "Sending…" : kind === "callback" ? "Request a callback" : "Submit enquiry"}</button>

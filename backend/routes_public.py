@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from core import (db, now_iso, new_id, next_code, normalize_phone, rate_limit, notify_roles, get_settings, audit,
                   save_upload, IMAGE_TYPES, UPLOAD_DIR)
 from routes_crm import create_lead
+from routes_props import CATEGORIES
 
 router = APIRouter()
 PUBLIC_FIELDS = ["listing_id", "title", "description_public", "category", "transaction", "city", "locality", "pincode",
@@ -130,7 +131,7 @@ async def enquiry(body: EnquiryIn, request: Request):
     camp = None
     if body.utm_campaign:
         camp = await db.campaigns.find_one({"code": body.utm_campaign}, {"_id": 0, "id": 1})
-    note = f"[{body.kind}] {body.message or ''}".strip()
+    note = f"[{body.kind}] {body.message}" if body.message else f"Website {body.kind}"
     if body.preferred_time:
         note += f" | Preferred time: {body.preferred_time}"
     lead, dup = await create_lead({
@@ -163,6 +164,8 @@ async def owner_submission(
         raise HTTPException(422, "You must confirm you are the owner or authorised representative")
     if transaction not in ("sale", "rent", "lease", "short_stay"):
         raise HTTPException(422, "Invalid intention")
+    if category not in CATEGORIES:
+        raise HTTPException(422, "Invalid property category")
     if pincode and not re.fullmatch(r"\d{6}", pincode):
         raise HTTPException(422, "PIN code must be 6 digits")
     if len(photos) > 6:
@@ -170,6 +173,7 @@ async def owner_submission(
     phone_n = normalize_phone(phone)
     saved = [await save_upload(p, IMAGE_TYPES, 5 * 1024 * 1024) for p in photos if p.filename]
     owner = await db.owners.find_one({"phone": phone_n}, {"_id": 0})
+    owner_match = bool(owner)
     if not owner:
         owner = {"id": new_id(), "code": await next_code("owner", "SE-O-"), "name": name.strip(), "phone": phone_n,
                  "email": email, "preferred_contact": preferred_contact, "kind": "individual", "is_nri": False,
@@ -182,6 +186,8 @@ async def owner_submission(
             "price_unit": "total" if transaction == "sale" else "per_month", "description_public": "",
             "owner_description": description, "requested_services": services, "status": "verification_pending",
             "source": "owner_submission", "images": [], "amenities": [], "verification": {"status": "pending"},
+            "owner_match_unverified": owner_match, "submitted_name": name.strip(),
+            "branch_id": {"erode": "br-erode", "perundurai": "br-perundurai"}.get(city.strip().lower()),
             "authorization": {}, "publication_history": [], "created_at": now_iso(), "updated_at": now_iso(),
             "deleted": False, "featured": False}
     await db.properties.insert_one(dict(prop))

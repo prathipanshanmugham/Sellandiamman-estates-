@@ -44,6 +44,7 @@ export default function ErpProperty() {
         </div>
         <div className="space-y-6">
           <Section title="Verification & authorisation" testid="verification-section">
+            {p.owner_match_unverified && <p className="mb-3 bg-amber-50 p-2 text-xs text-amber-800" data-testid="owner-match-warning">Submitted phone matched an existing owner record. Confirm the submitter ({p.submitted_name}) is that owner before verifying.</p>}
             <Facts items={[["Verification", <Badge v={p.verification?.status || "not_started"} testid="verification-badge" />], ["Verified by", p.verification?.by], ["Marketing authorised", p.authorization?.marketing_authorized ? "Yes" : "No"], ["Authorisation expiry", exp ? <span className={exp < todayIST() ? "font-semibold text-red-700" : ""}>{fmtDate(exp)}</span> : "-"]]} />
             {p.verifications?.map((v) => <p key={v.id} className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-500">{fmtDateTime(v.at)} · {v.by_name}: <b>{v.result}</b> {v.notes}</p>)}
           </Section>

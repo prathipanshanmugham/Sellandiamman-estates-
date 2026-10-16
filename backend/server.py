@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+from urllib.parse import urlparse
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -28,7 +29,9 @@ ALLOWED_ORIGINS = [o.strip() for o in os.environ["CORS_ORIGINS"].split(",") if o
 async def security(request: Request, call_next):
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         origin = request.headers.get("origin")
-        if origin and "*" not in ALLOWED_ORIGINS and origin not in ALLOWED_ORIGINS:
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+        same_origin = origin and urlparse(origin).netloc == host.split(",")[0].strip()
+        if origin and not same_origin and "*" not in ALLOWED_ORIGINS and origin not in ALLOWED_ORIGINS:
             return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
     try:
         resp = await call_next(request)

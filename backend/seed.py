@@ -22,6 +22,7 @@ async def ensure_indexes():
               "ledger_entries", "tasks", "approvals", "expenses", "vendors"):
         await db[c].create_index("id", unique=True)
     await db.properties.create_index("listing_id", sparse=True)
+    await db.invoices.create_index("deal_id", unique=True, partialFilterExpression={"deal_id": {"$type": "string"}})
     await db.properties.create_index([("status", 1), ("city", 1), ("transaction", 1)])
     await db.leads.create_index("phone")
     await db.leads.create_index([("stage", 1), ("assigned_to", 1)])

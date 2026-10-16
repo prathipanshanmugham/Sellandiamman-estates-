@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { BedDouble, Bath, Maximize, MapPin } from "lucide-react";
 import { label, priceLabel } from "../../lib/api";
 
-export const imgSrc = (u) => (u?.startsWith("/api/") ? `${process.env.REACT_APP_BACKEND_URL}${u}` : u || "/images/estate.jpg");
+export const imgSrc = (u) => (u?.startsWith("/api/") ? `${process.env.REACT_APP_BACKEND_URL}${u}` : u || "/images/placeholder.svg");
 
 export default function PropertyCard({ p }) {
   const area = p.built_area || p.plot_area;

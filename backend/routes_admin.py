@@ -440,6 +440,9 @@ async def decide(aid: str, body: dict, user=Depends(current_user)):
         except HTTPException as e:
             await db.approvals.update_one({"id": aid}, {"$set": {"status": "failed", "decision_note": e.detail}})
             raise
+        except Exception:
+            await db.approvals.update_one({"id": aid}, {"$set": {"status": "failed", "decision_note": "Action failed"}})
+            raise HTTPException(500, "Approval recorded but the action failed; please retry")
     await audit(user, f"approval_{'approved' if approve else 'rejected'}", "approvals", aid, {"kind": ap["kind"]})
     await notify([ap["requested_by"]], f"Your request was {'approved' if approve else 'rejected'}", ap["summary"],
                  "/erp/approvals", dedupe=f"apd:{aid}")
