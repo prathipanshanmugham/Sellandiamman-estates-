@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
@@ -207,6 +207,27 @@ async def record_rent(lid: str, body: RentIn, user=Depends(require("leases", "w"
     return p
 
 
+async def rent_receipt_pdf_bytes(p):
+    lease = await db.leases.find_one({"id": p["lease_id"]}, {"_id": 0, "schedule": 0}) or {}
+    owner = await db.owners.find_one({"id": p.get("owner_id")}, {"_id": 0, "name": 1}) or {}
+    return make_pdf(f"Rent Receipt {p['receipt_no']}", await get_settings(),
+                    [("Received from", lease.get("tenant_name", "-")), ("Property", lease.get("property_title", "-")),
+                     ("Lease", p["lease_code"]), ("Rent period", p["period"]), ("Date received", p["date"]),
+                     ("Method", p["method"].replace("_", " ").title()), ("Reference", p.get("reference") or "-"),
+                     ("Received on behalf of", owner.get("name", "the property owner"))],
+                    [], [], [("Amount received", inr(p["amount"]))],
+                    "Rent is collected on behalf of the property owner and held in the owner-funds account.")
+
+
+@router.get("/rent-payments/{pid}/receipt.pdf")
+async def rent_receipt(pid: str, user=Depends(require("leases", "r"))):
+    p = await db.rent_payments.find_one({"id": pid}, {"_id": 0})
+    if not p or not await db.leases.find_one({"id": p["lease_id"], **scope(user, "leases")}, {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Payment not found")
+    return Response(await rent_receipt_pdf_bytes(p), media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={p['receipt_no']}.pdf"})
+
+
 @router.post("/leases/{lid}/deposit")
 async def deposit(lid: str, body: DepositIn, user=Depends(require("leases", "w"))):
     lease = await _lease_for_write(lid, user)
@@ -262,7 +283,7 @@ async def statement(oid: str, month: str, user=Depends(require("owners", "r"))):
         raise HTTPException(403, "You do not have permission for this action")
     rents, exps, calc = await _statement_data(oid, month)
     existing = await db.owner_statements.find_one({"owner_id": oid, "month": month}, {"_id": 0})
-    return {"month": month, "rents": rents, "expenses": exps, **calc, "settled": existing}
+    return {"month": month, "rents": rents, **calc, "expense_items": exps, "settled": existing}
 
 
 @router.post("/owners/{oid}/statement/settle")
@@ -315,20 +336,29 @@ async def mark_paid(sid: str, body: dict, user=Depends(require("finance", "w")))
     return {"ok": True}
 
 
+async def statement_pdf_bytes(oid, month):
+    owner = await db.owners.find_one({"id": oid}, {"_id": 0}) or {}
+    rents, exps, calc = await _statement_data(oid, month)
+    settled = await db.owner_statements.find_one({"owner_id": oid, "month": month}, {"_id": 0}) or {}
+    rows = [[r["date"], r["lease_code"], f"Rent {r['period']}", inr(r["amount"])] for r in rents]
+    rows += [["", "", f"Expense: {e['description']}", inr(-e["amount"])] for e in exps]
+    meta = [("Owner", owner.get("name", "-")), ("Owner code", owner.get("code", "-")), ("Month", month)]
+    if settled:
+        meta += [("Statement", settled.get("code")), ("Payout", str(settled.get("payout_status", "")).replace("_", " ")),
+                 ("Transfer reference", settled.get("payout_reference") or "-")]
+    return make_pdf(f"Owner Statement {month}", await get_settings(), meta,
+                    ["Date", "Lease", "Description", "Amount"], rows,
+                    [("Rent collected", inr(calc["rent_collected"])), ("Management fee", inr(-calc["management_fee"])),
+                     ("Expenses", inr(-calc["expenses"])), ("Net payable to owner", inr(calc["net_payable"]))],
+                    "Funds are held on behalf of the owner and are not company revenue.")
+
+
 @router.get("/owners/{oid}/statement.pdf")
 async def statement_pdf(oid: str, month: str, user=Depends(require("owners", "r"))):
     if not (can(user, "leases", "r") or can(user, "finance", "r")):
         raise HTTPException(403, "You do not have permission for this action")
-    owner = await db.owners.find_one({"id": oid}, {"_id": 0}) or {}
-    rents, exps, calc = await _statement_data(oid, month)
-    rows = [[r["date"], r["lease_code"], f"Rent {r['period']}", inr(r["amount"])] for r in rents]
-    rows += [["", "", f"Expense: {e['description']}", inr(-e["amount"])] for e in exps]
-    pdf = make_pdf(f"Owner Statement {month}", await get_settings(), [("Owner", owner.get("name", "-"))],
-                   ["Date", "Lease", "Description", "Amount"], rows,
-                   [("Rent collected", inr(calc["rent_collected"])), ("Management fee", inr(-calc["management_fee"])),
-                    ("Expenses", inr(-calc["expenses"])), ("Net payable to owner", inr(calc["net_payable"]))],
-                   "Funds are held on behalf of the owner and are not company revenue.")
-    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": "inline; filename=statement.pdf"})
+    return Response(await statement_pdf_bytes(oid, month), media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename=statement-{month}.pdf"})
 
 
 # ---------------- Maintenance ----------------
@@ -397,6 +427,34 @@ async def new_vendor(body: VendorIn, user=Depends(require("maintenance", "w"))):
 
 
 # ---------------- Short stay ----------------
+def nights_between(check_in, check_out):
+    d, end = date.fromisoformat(check_in), date.fromisoformat(check_out)
+    while d < end:
+        yield d.isoformat()
+        d += timedelta(days=1)
+
+
+async def reserve_nights(bk):
+    """One document per booked night with a unique (property, night) index, so two people saving overlapping
+    bookings at the same moment cannot both succeed - even with several backend processes."""
+    done = []
+    try:
+        for night in nights_between(bk["check_in"], bk["check_out"]):
+            await db.booking_nights.insert_one({"property_id": bk["property_id"], "night": night, "booking_id": bk["id"]})
+            done.append(night)
+    except DuplicateKeyError:
+        if done:
+            await db.booking_nights.delete_many({"booking_id": bk["id"]})
+        clash = await db.booking_nights.find_one({"property_id": bk["property_id"], "night": {"$in": list(
+            nights_between(bk["check_in"], bk["check_out"]))}}, {"_id": 0, "booking_id": 1})
+        other = await db.bookings.find_one({"id": (clash or {}).get("booking_id")}, {"_id": 0, "code": 1}) or {}
+        raise HTTPException(409, f"Dates overlap with booking {other.get('code', 'another booking')}")
+
+
+async def release_nights(booking_id):
+    await db.booking_nights.delete_many({"booking_id": booking_id})
+
+
 def _booking_view(user, b):
     if not can(user, "shortstay", "w"):
         b.pop("guest_phone", None)
@@ -435,7 +493,12 @@ async def create_booking(body: BookingIn, user=Depends(require("shortstay", "w")
     bk = {"id": new_id(), "code": await next_code("booking", "SE-B-", 5), **data, **calc,
           "property_title": prop["title"], "owner_id": prop.get("owner_id"), "status": "confirmed", "settled": False,
           "issues": [], "created_by": user["id"], "created_at": now_iso()}
-    await db.bookings.insert_one(dict(bk))
+    await reserve_nights(bk)
+    try:
+        await db.bookings.insert_one(dict(bk))
+    except Exception:
+        await release_nights(bk["id"])
+        raise
     await db.tasks.insert_one({"id": new_id(), "title": f"Turnover cleaning – {prop['title']} ({bk['code']})",
                                "due_date": body.check_out, "priority": "high", "status": "open", "kind": "cleaning",
                                "related_type": "booking", "related_id": bk["id"], "assigned_to": None,
@@ -474,6 +537,7 @@ async def apply_booking_cancel(b, payload, user):
                                                "refund_amount": payload["refund_amount"], "cancelled_at": now_iso()}})
     if not r.modified_count:
         raise HTTPException(409, "Booking cannot be cancelled in its current state")
+    await release_nights(b["id"])
     await audit(user, "booking_cancelled", "shortstay", b["id"], payload)
     return {"ok": True}
 

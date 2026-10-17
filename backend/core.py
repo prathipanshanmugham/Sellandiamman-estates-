@@ -19,11 +19,22 @@ from pymongo import ReturnDocument  # noqa: E402
 from pymongo.errors import DuplicateKeyError  # noqa: E402
 
 logger = logging.getLogger("sellandiamman")
-client = AsyncIOMotorClient(os.environ["MONGO_URL"], tz_aware=True)
+MONGO_URL = os.environ["MONGO_URL"]
+if MONGO_URL.startswith("mongomock://"):
+    # In-memory database for the automated tests only (requirements-dev.txt). Never use in production.
+    from mongomock_motor import AsyncMongoMockClient  # noqa: E402
+    client = AsyncMongoMockClient(tz_aware=True)
+else:
+    client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
 db = client[os.environ["DB_NAME"]]
 JWT_SECRET = os.environ["JWT_SECRET"]
+if len(JWT_SECRET) < 32:
+    logging.getLogger("sellandiamman").warning("JWT_SECRET is shorter than 32 characters; use a long random value")
 JWT_ALG = "HS256"
 SESSION_HOURS = 12
+BCRYPT_ROUNDS = int(os.environ.get("BCRYPT_ROUNDS", "12"))
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() != "false"
+SITE_URL = os.environ.get("SITE_URL", "").rstrip("/")
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR") or (ROOT / "uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -38,7 +49,9 @@ ROLES = {
     "marketing": "Marketing Staff",
     "shortstay_ops": "Short-Stay Operations",
     "auditor": "Read-Only Auditor",
+    "owner": "Property Owner (portal)",
 }
+STAFF_ROLES = [r for r in ROLES if r != "owner"]
 MODULES = ["dashboard", "leads", "properties", "owners", "deals", "finance", "leases", "maintenance",
            "shortstay", "documents", "tasks", "reports", "cms", "users", "settings", "audit"]
 # r=read w=write a=approve e=export p=publish
@@ -59,6 +72,8 @@ PERMS = {
                       "documents": "r"},
     "auditor": {"dashboard": "r", "leads": "r", "properties": "r", "owners": "r", "deals": "r", "finance": "r",
                 "leases": "r", "maintenance": "r", "shortstay": "r", "reports": "re", "audit": "r"},
+    # Owners use the separate owner portal (/api/portal/*), which is scoped to their own owner record.
+    "owner": {},
 }
 # Record scope: these roles only see records where field == their user id
 OWN_SCOPE = {
@@ -95,7 +110,7 @@ async def next_code(name, prefix, width=4):
 
 
 def hash_password(p: str) -> str:
-    return bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(p.encode(), bcrypt.gensalt(BCRYPT_ROUNDS)).decode()
 
 
 def verify_password(p: str, h: str) -> bool:
@@ -126,8 +141,12 @@ _rate: dict = {}
 
 
 def rate_limit(request: Request, key: str, limit: int, window: int):
+    """In-memory limiter (one backend process). Use a shared store such as Redis if you run several."""
     k = f"{key}:{client_ip(request)}"
     t = time.time()
+    if len(_rate) > 20000:  # drop idle keys so memory stays bounded
+        for old in [x for x, v in _rate.items() if not v or v[-1] < t - 3600]:
+            _rate.pop(old, None)
     hits = [h for h in _rate.get(k, []) if h > t - window]
     if len(hits) >= limit:
         raise HTTPException(429, "Too many requests. Please try again later.")
@@ -135,10 +154,37 @@ def rate_limit(request: Request, key: str, limit: int, window: int):
     _rate[k] = hits
 
 
-def public_user(u):
-    return {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": u["role"],
-            "role_label": ROLES.get(u["role"]), "branch_ids": u.get("branch_ids", []), "active": u.get("active"),
-            "phone": u.get("phone"), "permissions": PERMS.get(u["role"], {}), "created_at": u.get("created_at")}
+_settings_cache = {"at": 0.0, "value": None}
+
+
+async def get_settings_cached(max_age=30):
+    if _settings_cache["value"] is None or time.time() - _settings_cache["at"] > max_age:
+        _settings_cache["value"] = await db.settings.find_one({"id": "company"}, {"_id": 0}) or {}
+        _settings_cache["at"] = time.time()
+    return _settings_cache["value"]
+
+
+def clear_settings_cache():
+    _settings_cache["value"] = None
+
+
+def mfa_required_for(user, settings) -> bool:
+    return user.get("role") in (settings.get("mfa_required_roles") or [])
+
+
+def public_user(u, settings=None):
+    out = {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": u["role"],
+           "role_label": ROLES.get(u["role"]), "branch_ids": u.get("branch_ids", []), "active": u.get("active"),
+           "phone": u.get("phone"), "permissions": PERMS.get(u["role"], {}), "created_at": u.get("created_at"),
+           "mfa_enabled": bool(u.get("mfa_enabled")), "owner_id": u.get("owner_id"),
+           "last_login": u.get("last_login")}
+    if settings is not None:
+        out["mfa_setup_required"] = mfa_required_for(u, settings) and not u.get("mfa_enabled")
+    return out
+
+
+# Paths a signed-in user may still call while their role requires 2-step login and they have not set it up.
+MFA_EXEMPT = ("/api/auth/",)
 
 
 async def current_user(request: Request):
@@ -157,10 +203,29 @@ async def current_user(request: Request):
     sess = await db.sessions.find_one({"sid": payload.get("sid"), "revoked": False})
     if not sess or sess["expires_at"] < now():
         raise HTTPException(401, "Session expired or revoked")
-    user = await db.users.find_one({"id": payload.get("sub"), "active": True}, {"_id": 0, "password_hash": 0})
+    user = await db.users.find_one({"id": payload.get("sub"), "active": True},
+                                   {"_id": 0, "password_hash": 0, "mfa_secret": 0, "mfa_pending_secret": 0,
+                                    "mfa_recovery": 0})
     if not user:
         raise HTTPException(401, "Account not active")
     user["sid"] = sess["sid"]
+    if not user.get("mfa_enabled") and not request.url.path.startswith(MFA_EXEMPT):
+        if mfa_required_for(user, await get_settings_cached()):
+            raise HTTPException(403, "mfa_setup_required")
+    return user
+
+
+async def staff_user(request: Request):
+    user = await current_user(request)
+    if user["role"] == "owner":
+        raise HTTPException(403, "This area is for staff accounts")
+    return user
+
+
+async def owner_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "owner" or not user.get("owner_id"):
+        raise HTTPException(403, "This area is for property owners")
     return user
 
 
@@ -205,16 +270,77 @@ async def audit(user, action, entity, entity_id, details=None):
         "details": details or {}, "at": now_iso()})
 
 
+SMTP = {k: os.environ.get(f"SMTP_{k}", "") for k in ("HOST", "PORT", "USER", "PASSWORD", "FROM", "TLS")}
+
+
+def email_configured() -> bool:
+    return bool(SMTP["HOST"] and SMTP["FROM"])
+
+
+def _send_email_sync(to, subject, text, html=None):
+    import smtplib
+    import ssl
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = SMTP["FROM"], to, subject
+    msg.set_content(text)
+    if html:
+        msg.add_alternative(html, subtype="html")
+    port = int(SMTP["PORT"] or 587)
+    ctx = ssl.create_default_context()
+    if port == 465 or SMTP["TLS"].lower() == "ssl":
+        with smtplib.SMTP_SSL(SMTP["HOST"], port, context=ctx, timeout=20) as s:
+            if SMTP["USER"]:
+                s.login(SMTP["USER"], SMTP["PASSWORD"])
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(SMTP["HOST"], port, timeout=20) as s:
+            if SMTP["TLS"].lower() != "none":
+                s.starttls(context=ctx)
+            if SMTP["USER"]:
+                s.login(SMTP["USER"], SMTP["PASSWORD"])
+            s.send_message(msg)
+
+
+async def send_email(to, subject, text, html=None) -> str:
+    """Sends through SMTP when SMTP_HOST/SMTP_FROM are set; otherwise only logs (development)."""
+    if not to:
+        return "skipped"
+    if not email_configured():
+        logger.info("[EMAIL-DEV] to=%s subject=%s\n%s", to, subject, text)
+        return "dev_logged"
+    try:
+        await asyncio.to_thread(_send_email_sync, to, subject, text, html)
+        return "sent"
+    except Exception:
+        logger.exception("Email to %s failed", to)
+        return "failed"
+
+
+def _email_body(title, body, link):
+    url = f"{SITE_URL}{link}" if link and SITE_URL else ""
+    text = f"{title}\n\n{body or ''}\n\n{('Open: ' + url) if url else ''}\n\n— Sellandiamman Estates"
+    return text
+
+
+async def _email_notification(uid, title, body, link, nid):
+    u = await db.users.find_one({"id": uid, "active": True}, {"_id": 0, "email": 1})
+    status = await send_email(u and u.get("email"), title, _email_body(title, body, link))
+    await db.notifications.update_one({"id": nid}, {"$set": {"email_status": status}})
+
+
 async def notify(user_ids, title, body="", link="", dedupe=None, kind="info"):
+    settings = await get_settings_cached()
     for uid in set(filter(None, user_ids)):
         doc = {"id": new_id(), "user_id": uid, "title": title, "body": body, "link": link, "kind": kind,
                "read": False, "created_at": now_iso(), "dedupe_key": f"{dedupe}:{uid}" if dedupe else new_id(),
-               "email_status": "dev_logged"}
+               "email_status": "off"}
         try:
             await db.notifications.insert_one(doc)
-            logger.info("[EMAIL-DEV] to=%s subject=%s", uid, title)
         except DuplicateKeyError:
-            pass
+            continue
+        if settings.get("email_notifications"):
+            asyncio.create_task(_email_notification(uid, title, body, link, doc["id"]))
 
 
 async def notify_roles(roles, title, body="", link="", dedupe=None, kind="info", branch_id=None):

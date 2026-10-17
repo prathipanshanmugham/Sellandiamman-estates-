@@ -7,9 +7,10 @@ import jwt
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
-from core import (db, now, now_iso, new_id, require, can, scope, is_scoped, current_user, get_scoped, audit, notify,
-                  notify_roles, get_settings, save_upload, today_ist, JWT_SECRET, JWT_ALG, UPLOAD_DIR, IMAGE_TYPES,
-                  DOC_TYPES, IST, PERMS)
+from core import (db, now, now_iso, new_id, require, can, scope, is_scoped, current_user, staff_user, get_scoped,
+                  audit, notify, notify_roles, get_settings, save_upload, today_ist, clear_settings_cache,
+                  email_configured, JWT_SECRET, JWT_ALG, UPLOAD_DIR, IMAGE_TYPES, DOC_TYPES, IST, PERMS, ROLES,
+                  STAFF_ROLES, SITE_URL)
 from routes_finance import do_reverse, apply_credit_note
 from routes_deals import apply_commission
 from routes_ops import apply_booking_cancel
@@ -49,6 +50,7 @@ async def dashboard(frm: Optional[str] = None, to: Optional[str] = None, user=De
         }
         vf = {} if not scope(user, "leads") else {"agent_id": user["id"]}
         out["site_visits"] = {"scheduled": await db.site_visits.count_documents({**vf, "status": "scheduled"}),
+                              "requested": await db.site_visits.count_documents({**vf, "status": "requested"}),
                               "completed": await db.site_visits.count_documents({**vf, "status": "completed",
                                                                                  "updated_at": rng})}
         staff = await db.leads.aggregate([{"$match": {**lf, "assigned_to": {"$ne": None}}}, {"$group": {
@@ -143,11 +145,15 @@ REPORTS = {
                                                 "locality", "status", "authorization", "created_at"]),
     "owner_statements": ("owner_statements", "finance", ["code", "owner_name", "month", "rent_collected",
                                                          "management_fee", "expenses", "net_payable", "payout_status"]),
+    "site_visits": ("site_visits", "leads", ["lead_name", "property_code", "property_title", "scheduled_at", "status",
+                                             "feedback", "source", "created_at"]),
+    "expenses": ("expenses", "finance", ["code", "date", "category", "description", "vendor", "amount", "gst_amount",
+                                         "paid_from", "created_at"]),
 }
 
 
 @router.get("/reports/{name}.csv")
-async def report_csv(name: str, frm: Optional[str] = None, to: Optional[str] = None, user=Depends(current_user)):
+async def report_csv(name: str, frm: Optional[str] = None, to: Optional[str] = None, user=Depends(staff_user)):
     if name not in REPORTS:
         raise HTTPException(404, "Unknown report")
     coll, module, cols = REPORTS[name]
@@ -172,7 +178,8 @@ async def report_csv(name: str, frm: Optional[str] = None, to: Optional[str] = N
 
 # ---------------- Documents ----------------
 ENTITY_MODULE = {"property": "properties", "lead": "leads", "deal": "deals", "lease": "leases", "owner": "owners",
-                 "booking": "shortstay", "work_order": "maintenance", "vendor": "maintenance", "company": "settings"}
+                 "booking": "shortstay", "work_order": "maintenance", "vendor": "maintenance", "company": "settings",
+                 "post": "cms"}
 ENTITY_COLL = {"property": "properties", "lead": "leads", "deal": "deals"}
 
 
@@ -272,6 +279,67 @@ async def approve_public(did: str, user=Depends(require("cms", "p"))):
     await db.properties.update_one({"id": d["entity_id"]}, {"$addToSet": {"images": f"/api/public/media/{did}"}})
     await audit(user, "media_approved", "documents", did)
     return {"ok": True}
+
+
+@router.patch("/documents/{did}/share")
+async def share_doc(did: str, body: dict, user=Depends(require("documents", "w"))):
+    """Lets the property owner see this document in their owner portal (KYC is never shared)."""
+    d = await db.documents.find_one({"id": did}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Not found")
+    await _check_entity(user, d["entity_type"], d["entity_id"])
+    if d["entity_type"] not in ("property", "owner") or d["doc_type"] == "kyc":
+        raise HTTPException(422, "Only property or owner documents (not KYC) can be shared with the owner")
+    share = bool(body.get("share"))
+    await db.documents.update_one({"id": did}, {"$set": {"share_with_owner": share}})
+    await audit(user, "document_shared" if share else "document_unshared", "documents", did)
+    return {"ok": True, "share_with_owner": share}
+
+
+# ---------------- Calendar ----------------
+@router.get("/calendar")
+async def calendar(frm: str, to: str, user=Depends(staff_user)):
+    """Site visits, stays, lease ends, rent due dates, task deadlines and listing-authorisation expiries in a range."""
+    if len(frm) != 10 or len(to) != 10 or to < frm:
+        raise HTTPException(422, "Use from/to dates as YYYY-MM-DD")
+    ev = []
+    end = to + "T23:59"
+    if can(user, "leads", "r"):
+        vf = {"agent_id": user["id"]} if is_scoped(user, "leads") else {}
+        for v in await db.site_visits.find({**vf, "scheduled_at": {"$gte": frm, "$lte": end},
+                                            "status": {"$in": ["requested", "scheduled", "completed"]}}, {"_id": 0}).to_list(2000):
+            ev.append({"type": "visit", "date": v["scheduled_at"][:10], "time": v["scheduled_at"][11:16],
+                       "title": f"Visit · {v['lead_name']}", "sub": f"{v['property_code']} {v['property_title']}",
+                       "status": v["status"], "link": f"/erp/leads/{v['lead_id']}"})
+    if can(user, "shortstay", "r"):
+        for b in await db.bookings.find({"status": {"$ne": "cancelled"}, "check_in": {"$lte": to},
+                                         "check_out": {"$gte": frm}}, {"_id": 0}).to_list(2000):
+            ev.append({"type": "stay", "date": b["check_in"], "end": b["check_out"], "title": f"Stay · {b['guest_name']}",
+                       "sub": f"{b['code']} {b['property_title']} ({b['nights']} nights)", "status": b["status"],
+                       "link": "/erp/short-stay"})
+    if can(user, "leases", "r"):
+        lf = scope(user, "leases")
+        for ls in await db.leases.find({**lf, "status": "active"}, {"_id": 0}).to_list(2000):
+            if frm <= ls["end_date"] <= to:
+                ev.append({"type": "lease_end", "date": ls["end_date"], "title": f"Lease ends · {ls['tenant_name']}",
+                           "sub": f"{ls['code']} {ls['property_title']}", "status": "active", "link": "/erp/leases"})
+            for sch in ls["schedule"]:
+                if frm <= sch["due_date"] <= to:
+                    ev.append({"type": "rent", "date": sch["due_date"], "title": f"Rent due · {ls['tenant_name']}",
+                               "sub": f"{ls['code']} {sch['period']}", "status": "paid" if sch["paid"] >= sch["amount"] else "due",
+                               "link": "/erp/leases"})
+    if can(user, "tasks", "r"):
+        tf = {} if user["role"] in ("super_admin", "director", "branch_manager") else {"assigned_to": user["id"]}
+        for t in await db.tasks.find({**tf, "due_date": {"$gte": frm, "$lte": to}, "status": {"$ne": "done"}},
+                                     {"_id": 0}).to_list(2000):
+            ev.append({"type": "task", "date": t["due_date"][:10], "title": t["title"], "sub": t.get("kind", "").replace("_", " "),
+                       "status": t["status"], "link": "/erp/tasks"})
+    if can(user, "properties", "r"):
+        for p in await db.properties.find({**scope(user, "properties"), "deleted": {"$ne": True},
+                                           "authorization.expiry": {"$gte": frm, "$lte": to}}, {"_id": 0}).to_list(2000):
+            ev.append({"type": "authorisation", "date": p["authorization"]["expiry"], "title": f"Authorisation ends · {p['code']}",
+                       "sub": p["title"], "status": p["status"], "link": f"/erp/properties/{p['id']}"})
+    return sorted(ev, key=lambda e: (e["date"], e.get("time") or ""))
 
 
 # ---------------- Tasks ----------------
@@ -383,6 +451,12 @@ async def run_automations():
         await notify_roles(["shortstay_ops"], f"Check-in {b['check_in']}: {b['code']}", b["property_title"],
                            "/erp/short-stay", dedupe=f"ci:{b['id']}")
         n += 1
+    stale = (datetime.now(IST) - timedelta(hours=4)).isoformat()
+    async for v in db.site_visits.find({"status": "requested", "created_at": {"$lt": stale}}, {"_id": 0}):
+        await notify_roles(["branch_manager", "director"], f"Visit request waiting: {v['lead_name']}",
+                           f"{v['property_code']} · asked for {v['scheduled_at']}", f"/erp/leads/{v['lead_id']}",
+                           dedupe=f"vwait:{v['id']}", kind="warning")
+        n += 1
     async for w in db.work_orders.find({"status": {"$in": ["open", "assigned", "in_progress"]}, "due_date": {"$lt": ts, "$ne": None}}, {"_id": 0}):
         await notify_roles(["branch_manager", "property_manager"], f"Work order overdue: {w['code']}", w["title"],
                            "/erp/maintenance", dedupe=f"wo_due:{w['id']}", kind="warning")
@@ -401,14 +475,14 @@ APPROVAL_PERM = {"commission_change": ("deals", "a"), "ledger_reversal": ("finan
 
 
 @router.get("/approvals")
-async def list_approvals(user=Depends(current_user)):
+async def list_approvals(user=Depends(staff_user)):
     kinds = [k for k, (m, a) in APPROVAL_PERM.items() if can(user, m, a)]
     f = {"$or": [{"kind": {"$in": kinds}}, {"requested_by": user["id"]}]}
     return await db.approvals.find(f, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 
 @router.post("/approvals/{aid}/decide")
-async def decide(aid: str, body: dict, user=Depends(current_user)):
+async def decide(aid: str, body: dict, user=Depends(staff_user)):
     ap = await db.approvals.find_one({"id": aid}, {"_id": 0})
     if not ap:
         raise HTTPException(404, "Approval not found")
@@ -451,19 +525,20 @@ async def decide(aid: str, body: dict, user=Depends(current_user)):
 
 # ---------------- Settings / CMS / audit / branches / campaigns ----------------
 SETTINGS_FIELDS = ["name", "legal_name", "phone", "whatsapp", "email", "address", "gstin", "gst_enabled", "gst_rate",
-                   "cities", "localities", "approvals", "demo_mode", "invoice_due_days", "office_hours", "enquiry_routing"]
-CMS_FIELDS = ["hero_title", "hero_subtitle", "seo_title", "seo_description", "testimonials"]
+                   "cities", "localities", "approvals", "demo_mode", "invoice_due_days", "office_hours", "enquiry_routing",
+                   "rera_no", "social", "mfa_required_roles", "email_notifications", "map_center"]
+CMS_FIELDS = ["hero_title", "hero_subtitle", "seo_title", "seo_description", "testimonials", "announcement"]
 
 
 @router.get("/settings")
-async def get_all_settings(user=Depends(current_user)):
+async def get_all_settings(user=Depends(staff_user)):
     if not (can(user, "settings", "r") or can(user, "cms", "r")):
         raise HTTPException(403, "You do not have permission for this action")
     return await get_settings()
 
 
 @router.put("/settings")
-async def put_settings(body: dict, user=Depends(current_user)):
+async def put_settings(body: dict, user=Depends(staff_user)):
     allowed = (SETTINGS_FIELDS if can(user, "settings", "w") else []) + (CMS_FIELDS if can(user, "cms", "w") else [])
     if not allowed:
         raise HTTPException(403, "You do not have permission for this action")
@@ -473,9 +548,40 @@ async def put_settings(body: dict, user=Depends(current_user)):
         if rate < 0 or rate > 28:
             raise HTTPException(422, "GST rate must be between 0 and 28")
         upd["gst_rate"] = rate
+    if "mfa_required_roles" in upd:
+        roles = [r for r in (upd["mfa_required_roles"] or []) if r in ROLES]
+        if user["role"] in roles and not user.get("mfa_enabled"):
+            raise HTTPException(422, "Turn on 2-step sign-in for your own account first, then require it for your role")
+        upd["mfa_required_roles"] = roles
+    if "social" in upd:
+        upd["social"] = {k: str(v)[:200] for k, v in (upd["social"] or {}).items()
+                         if k in ("facebook", "instagram", "youtube", "linkedin", "x", "google_business") and v}
+    if "testimonials" in upd:
+        upd["testimonials"] = [{"quote": str(t.get("quote", ""))[:400], "name": str(t.get("name", ""))[:80]}
+                               for t in (upd["testimonials"] or []) if isinstance(t, dict) and t.get("quote")][:9]
+    if "invoice_due_days" in upd:
+        upd["invoice_due_days"] = max(0, min(120, int(upd["invoice_due_days"] or 15)))
     await db.settings.update_one({"id": "company"}, {"$set": upd}, upsert=True)
+    clear_settings_cache()
     await audit(user, "settings_updated", "settings", "company", upd)
     return await get_settings()
+
+
+@router.get("/system/status")
+async def system_status(user=Depends(require("settings", "r"))):
+    """Go-live checklist: what is configured on this server."""
+    import os
+    s = await get_settings()
+    return {"site_url": SITE_URL or None, "email": email_configured(),
+            "turnstile": bool(os.environ.get("TURNSTILE_SECRET")), "demo_mode": bool(s.get("demo_mode")),
+            "demo_data": await db.users.count_documents({"email": {"$regex": "@demo\\.sellandiamman\\.test$"}}) > 0,
+            "whatsapp": bool(s.get("whatsapp")), "contact_placeholder": "00000" in (s.get("phone") or "00000")
+            or "example.com" in (s.get("email") or "example.com") or "[Office" in (s.get("address") or "[Office"),
+            "gst": bool(s.get("gst_enabled")), "rera": bool(s.get("rera_no")),
+            "mfa_roles": s.get("mfa_required_roles") or [],
+            "admins_without_mfa": await db.users.count_documents({"role": {"$in": ["super_admin", "director"]},
+                                                                  "active": True, "mfa_enabled": {"$ne": True}}),
+            "cookie_secure": os.environ.get("COOKIE_SECURE", "true").lower() != "false"}
 
 
 @router.post("/settings/logo")
@@ -485,7 +591,17 @@ async def upload_logo(file: UploadFile = File(...), user=Depends(require("settin
         raise HTTPException(422, "Logo must be PNG/JPEG/WebP under 1 MB")
     url = f"data:{file.content_type};base64,{base64.b64encode(data).decode()}"
     await db.settings.update_one({"id": "company"}, {"$set": {"logo": url}}, upsert=True)
+    clear_settings_cache()
     await audit(user, "logo_updated", "settings", "company")
+    return {"ok": True}
+
+
+@router.delete("/settings/logo")
+async def remove_logo(user=Depends(require("settings", "w"))):
+    """Goes back to the built-in SA logo."""
+    await db.settings.update_one({"id": "company"}, {"$set": {"logo": None}}, upsert=True)
+    clear_settings_cache()
+    await audit(user, "logo_removed", "settings", "company")
     return {"ok": True}
 
 
@@ -500,7 +616,7 @@ async def audit_logs(entity: Optional[str] = None, entity_id: Optional[str] = No
 
 
 @router.get("/branches")
-async def branches(user=Depends(current_user)):
+async def branches(user=Depends(staff_user)):
     return await db.branches.find({}, {"_id": 0}).to_list(100)
 
 

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, inr, label, opts, todayIST, uid } from "../../lib/api";
+import { api, fmtDate, inr, label, opts, todayIST, uid, openFile } from "../../lib/api";
+import { useDialog } from "../../lib/dialogs";
 import { useAuth } from "../../lib/auth";
 import { PageHeader, DataTable, Badge, FormDialog, Modal, Facts, Section, useList, act } from "../../components/erp/kit";
 
 function LeaseModal({ lease, onClose, reload }) {
   const { can } = useAuth();
+  const dialog = useDialog();
   const [d, setD] = useState(null);
   const [dlg, setDlg] = useState(null);
   const load = () => lease && api.get(`/leases/${lease.id}`).then((r) => setD(r.data));
@@ -15,10 +17,13 @@ function LeaseModal({ lease, onClose, reload }) {
     <Modal open={!!lease} onClose={onClose} title={`Lease ${lease?.code || ""}`} wide>
       {d && <div className="space-y-4" data-testid="lease-detail">
         <Facts items={[["Property", d.property_title], ["Tenant", `${d.tenant_name} · ${d.tenant_phone}`], ["Period", `${fmtDate(d.start_date)} – ${fmtDate(d.end_date)}`], ["Rent", `${inr(d.rent)} due day ${d.due_day}`], ["Escalation", `${d.escalation_pct}% every ${d.escalation_every_months} months`], ["Management fee", `${d.mgmt_fee_pct}%`], ["Deposit agreed", inr(d.deposit)], ["Deposit held (liability)", <span data-testid="deposit-held">{inr(d.deposit_held)}</span>], ["Arrears", <b className={d.arrears > 0 ? "text-red-700" : ""} data-testid="lease-arrears">{inr(d.arrears)}</b>], ["Status", <Badge v={d.status} />]]} />
-        {w && <div className="flex flex-wrap gap-2"><button className="btn-line btn-sm" onClick={() => setDlg({ kind: "deposit", direction: "in", key: uid() })} data-testid="deposit-in-btn">Record deposit received</button><button className="btn-line btn-sm" onClick={() => setDlg({ kind: "deposit", direction: "out", key: uid() })}>Refund deposit</button><button className="btn-line btn-sm" onClick={() => setDlg({ kind: "handover" })} data-testid="handover-btn">Move-in / out checklist</button><button className="btn-line btn-sm" onClick={async () => { if (window.confirm("End this lease?")) { await act(() => api.post(`/leases/${d.id}/terminate`, { reason: "ended" }), "Lease ended"); after(); } }}>End lease</button></div>}
+        {w && <div className="flex flex-wrap gap-2"><button className="btn-line btn-sm" onClick={() => setDlg({ kind: "deposit", direction: "in", key: uid() })} data-testid="deposit-in-btn">Record deposit received</button><button className="btn-line btn-sm" onClick={() => setDlg({ kind: "deposit", direction: "out", key: uid() })}>Refund deposit</button><button className="btn-line btn-sm" onClick={() => setDlg({ kind: "handover" })} data-testid="handover-btn">Move-in / out checklist</button><button className="btn-line btn-sm" onClick={async () => { const reason = await dialog.ask({ title: "End this lease?", body: "The property is marked vacant. Record the move-out handover and refund the deposit separately.", label: "Reason", initial: "Lease term completed", okLabel: "End lease", tone: "danger" }); if (reason) { await act(() => api.post(`/leases/${d.id}/terminate`, { reason }), "Lease ended"); after(); } }} data-testid="end-lease-btn">End lease</button></div>}
         <Section title="Rent schedule (collected on behalf of owner)">
           <DataTable testid="rent-schedule-table" rows={d.schedule} columns={[{ key: "period", label: "Period" }, { key: "due_date", label: "Due", render: (s) => fmtDate(s.due_date) }, { key: "amount", label: "Rent", render: (s) => inr(s.amount) }, { key: "paid", label: "Received", render: (s) => inr(s.paid) }, { key: "st", label: "", render: (s) => s.paid >= s.amount ? <Badge v="paid" /> : s.due_date < todayIST() ? <Badge v="overdue" /> : <Badge v="upcoming" /> }, { key: "x", label: "", render: (s) => s.paid < s.amount && w ? <button className="btn-line btn-sm" onClick={() => setDlg({ kind: "rent", period: s.period, amount: s.amount - s.paid, key: uid() })} data-testid={`record-rent-${s.period}`}>Record rent</button> : null }]} />
         </Section>
+        {d.payments?.length > 0 && <Section title="Rent received">
+          <DataTable testid="rent-payments-table" rows={d.payments} columns={[{ key: "receipt_no", label: "Receipt" }, { key: "period", label: "Period" }, { key: "date", label: "Received", render: (p) => fmtDate(p.date) }, { key: "method", label: "Method", render: (p) => label(p.method) }, { key: "amount", label: "Amount", render: (p) => inr(p.amount) }, { key: "x", label: "", render: (p) => <button className="btn-line btn-sm" onClick={() => openFile(`/rent-payments/${p.id}/receipt.pdf`, { name: `Rent receipt ${p.receipt_no}` })} data-testid={`rent-receipt-${p.receipt_no}`}>Receipt PDF</button> }]} />
+        </Section>}
         {d.handovers?.length > 0 && <Section title="Handover records">{d.handovers.map((h) => <p key={h.id} className="border-b border-slate-100 py-1 text-sm">{label(h.kind)} · {fmtDate(h.date)} · meters: {h.meter_readings || "-"} · {h.notes}</p>)}</Section>}
       </div>}
       <FormDialog open={dlg?.kind === "rent"} onClose={() => setDlg(null)} title={`Record rent ${dlg?.period || ""}`} initial={{ amount: dlg?.amount, method: "upi", date: todayIST(), idempotency_key: dlg?.key }} fields={[{ name: "amount", label: "Amount (₹)", type: "number", required: true }, { name: "method", label: "Method", type: "select", required: true, options: opts(["upi", "bank_transfer", "cheque", "cash"]) }, { name: "date", label: "Received on", type: "date", required: true }, { name: "reference", label: "Reference" }]} onSubmit={async (v) => { await api.post(`/leases/${d.id}/rent`, { ...v, period: dlg.period }); after(); }} />

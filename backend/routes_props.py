@@ -274,7 +274,28 @@ async def get_owner(oid: str, user=Depends(require("owners", "r"))):
     o["properties"] = await db.properties.find({"owner_id": oid, "deleted": {"$ne": True}},
                                                {"_id": 0, "id": 1, "code": 1, "title": 1, "status": 1}).to_list(200)
     o["statements"] = await db.owner_statements.find({"owner_id": oid}, {"_id": 0}).sort("month", -1).to_list(60)
+    if can(user, "users", "r"):
+        o["portal_users"] = await db.users.find({"owner_id": oid, "role": "owner"},
+                                                {"_id": 0, "id": 1, "email": 1, "active": 1, "last_login": 1}).to_list(10)
     return o
+
+
+@router.post("/owners/{oid}/portal-invite")
+async def portal_invite(oid: str, body: dict, user=Depends(require("users", "w"))):
+    """Creates an owner-portal login for this owner; the owner sets a password from the emailed one-time link."""
+    from routes_auth import create_user, UserIn
+    o = await db.owners.find_one({"id": oid, "deleted": {"$ne": True}}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Record not found")
+    email = (body.get("email") or o.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(422, "Add the owner's email address first")
+    out = await create_user(UserIn(email=email, name=o["name"][:100], role="owner", owner_id=oid,
+                                   phone=o.get("phone")), user)
+    if not o.get("email"):
+        await db.owners.update_one({"id": oid}, {"$set": {"email": email}})
+    await audit(user, "owner_portal_invited", "owners", oid, {"email": email})
+    return out
 
 
 @router.patch("/owners/{oid}")

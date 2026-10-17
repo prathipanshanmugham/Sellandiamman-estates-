@@ -13,7 +13,7 @@ export function PageHeader({ title, sub, children }) {
 }
 
 const TONES = { green: "bg-emerald-50 text-emerald-800 border-emerald-200", amber: "bg-amber-50 text-amber-800 border-amber-200", blue: "bg-blue-50 text-blue-800 border-blue-200", red: "bg-red-50 text-red-800 border-red-200", grey: "bg-slate-50 text-slate-700 border-slate-200" };
-const STATUS_TONE = { published: "green", verified: "green", won: "green", paid: "green", active: "green", completed: "green", closed: "grey", done: "green", approved: "green", settled: "green", verification_pending: "amber", pending: "amber", partially_paid: "amber", negotiation: "blue", agreement: "blue", issued: "blue", confirmed: "blue", in_progress: "blue", checked_in: "blue", lost: "red", cancelled: "red", rejected: "red", disputed: "red", void: "red", urgent: "red", high: "amber", overdue: "red", failed: "red" };
+const STATUS_TONE = { published: "green", verified: "green", won: "green", paid: "green", active: "green", completed: "green", closed: "grey", done: "green", approved: "green", settled: "green", verification_pending: "amber", pending: "amber", partially_paid: "amber", negotiation: "blue", agreement: "blue", issued: "blue", confirmed: "blue", in_progress: "blue", checked_in: "blue", lost: "red", cancelled: "red", rejected: "red", disputed: "red", void: "red", urgent: "red", high: "amber", overdue: "red", failed: "red", requested: "amber", scheduled: "blue", no_show: "red", ready_to_market: "blue", under_offer: "blue", pending_manual_transfer: "amber", due: "amber", visit: "blue", stay: "green", rent: "amber", lease_end: "red", task: "grey", authorisation: "amber" };
 export function Badge({ v, tone, testid }) {
   return <span className={`inline-block whitespace-nowrap border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${TONES[tone || STATUS_TONE[v] || "grey"]}`} data-testid={testid}>{label(v)}</span>;
 }
@@ -28,18 +28,18 @@ export function Kpi({ title, value, hint, testid, onClick }) {
   );
 }
 
-export function DataTable({ columns, rows, onRow, testid = "data-table", empty = "No records yet." }) {
+export function DataTable({ columns, rows, onRow, testid = "data-table", empty = "No records yet.", cards = true, loading = false }) {
   return (
     <div className="panel overflow-x-auto" data-testid={testid}>
-      <table className="tbl w-full">
+      <table className={`tbl w-full ${cards ? "tbl-cards" : ""}`}>
         <thead><tr>{columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={r.id || i} onClick={onRow ? () => onRow(r) : undefined} className={onRow ? "cursor-pointer hover:bg-slate-50" : ""} data-testid={`${testid}-row-${i}`}>
-              {columns.map((c) => <td key={c.key}>{c.render ? c.render(r) : r[c.key] ?? "-"}</td>)}
+            <tr key={r.id || i} onClick={onRow ? () => onRow(r) : undefined} onKeyDown={onRow ? (e) => { if (e.key === "Enter") onRow(r); } : undefined} tabIndex={onRow ? 0 : undefined} className={onRow ? "cursor-pointer hover:bg-slate-50 focus:bg-slate-50 focus:outline-none" : ""} data-testid={`${testid}-row-${i}`}>
+              {columns.map((c) => <td key={c.key} data-label={typeof c.label === "string" ? c.label : ""}>{c.render ? c.render(r) : r[c.key] ?? "-"}</td>)}
             </tr>
           ))}
-          {!rows.length && <tr><td colSpan={columns.length} className="py-10 text-center text-slate-400">{empty}</td></tr>}
+          {!rows.length && <tr><td colSpan={columns.length} className="empty-cell py-10 text-center text-slate-400">{loading ? "Loading…" : empty}</td></tr>}
         </tbody>
       </table>
     </div>

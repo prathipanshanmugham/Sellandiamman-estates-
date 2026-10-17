@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, label, opts, priceLabel } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { useDialog } from "../../lib/dialogs";
 import { PageHeader, DataTable, Badge, FormDialog, useList } from "../../components/erp/kit";
 
 export const CATS = ["residential", "apartment", "villa", "land", "agricultural", "commercial", "shop", "office", "industrial", "warehouse", "factory_shed", "other"];
@@ -42,6 +43,7 @@ export const toPropBody = (v) => {
 export default function Properties() {
   const nav = useNavigate();
   const { can } = useAuth();
+  const dialog = useDialog();
   const [flt, setFlt] = useState({ status: "", q: "", transaction: "" });
   const [open, setOpen] = useState(false);
   const { rows } = useList("/properties", { status: flt.status || undefined, q: flt.q || undefined, transaction: flt.transaction || undefined });
@@ -54,7 +56,7 @@ export default function Properties() {
         {can("properties", "w") && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-property-btn">New property</button>}
       </PageHeader>
       <div className="mb-4 flex flex-wrap gap-2">
-        <input className="inp !w-56" placeholder="Search title, code, locality" value={flt.q} onChange={(e) => setFlt({ ...flt, q: e.target.value })} data-testid="property-search-input" />
+        <input className="inp sm:!w-56" placeholder="Search title, code, locality" value={flt.q} onChange={(e) => setFlt({ ...flt, q: e.target.value })} data-testid="property-search-input" />
         <select className="inp !w-auto" value={flt.status} onChange={(e) => setFlt({ ...flt, status: e.target.value })} data-testid="property-status-filter"><option value="">All statuses</option>{PSTATUS.map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
         <select className="inp !w-auto" value={flt.transaction} onChange={(e) => setFlt({ ...flt, transaction: e.target.value })} data-testid="property-tx-filter"><option value="">All transactions</option>{["sale", "rent", "lease", "short_stay"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
       </div>
@@ -68,7 +70,7 @@ export default function Properties() {
       <FormDialog open={open} onClose={() => setOpen(false)} title="New property" fields={propFields(can("owners") ? owners : [], users, branches)} initial={{ transaction: "sale", category: "residential", ownership_type: "third_party", service_type: "brokerage", price_unit: "total", area_unit: "sq.ft", city: "Erode" }}
         onSubmit={async (v) => {
           try { const r = await api.post("/properties", toPropBody(v)); nav(`/erp/properties/${r.data.id}`); }
-          catch (e) { if (e.response?.status === 409 && window.confirm(`${e.response.data.detail}. Create anyway?`)) { const r = await api.post("/properties", { ...toPropBody(v), force: true }); nav(`/erp/properties/${r.data.id}`); } else throw e; }
+          catch (e) { if (e.response?.status === 409 && await dialog.confirm({ title: "Possible duplicate", body: `${e.response.data.detail}. Create a separate property anyway?`, okLabel: "Create anyway" })) { const r = await api.post("/properties", { ...toPropBody(v), force: true }); nav(`/erp/properties/${r.data.id}`); } else throw e; }
         }} />
     </div>
   );

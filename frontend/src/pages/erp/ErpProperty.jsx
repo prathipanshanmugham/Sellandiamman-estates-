@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { api, fmtDate, fmtDateTime, label, priceLabel, todayIST } from "../../lib/api";
+import { Link, useParams } from "react-router-dom";
+import { api, fmtDate, fmtDateTime, label, priceLabel, todayIST, openFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { PageHeader, Badge, FormDialog, Section, Facts, useList, act } from "../../components/erp/kit";
 import { propFields, toPropBody } from "./Properties";
@@ -30,6 +30,7 @@ export default function ErpProperty() {
         {can("properties", "w") && !["inactive", "archived"].includes(p.status) && <button className="btn-line btn-sm" onClick={() => move("inactive")} data-testid="transition-inactive-btn">Deactivate</button>}
         {can("properties", "a") && ["verification_pending", "verified", "ready_to_market", "published"].includes(p.status) && <button className="btn-dark btn-sm" onClick={() => setDlg("verify")} data-testid="verify-property-btn">Verify / authorise</button>}
         {can("properties", "w") && <button className="btn-line btn-sm" onClick={() => setDlg("edit")} data-testid="edit-property-btn">Edit</button>}
+        {p.listing_id && ["published", "under_offer"].includes(p.status) && <><Link to={`/properties/${p.listing_id}`} className="btn-line btn-sm" data-testid="view-public-btn">View on website</Link><button className="btn-line btn-sm" onClick={() => openFile(`/public/properties/${p.listing_id}/brochure.pdf`, { name: `${p.listing_id} brochure` })} data-testid="brochure-btn">Brochure PDF</button></>}
         {can("cms", "w") && p.status === "published" && <button className="btn-line btn-sm" onClick={async () => { await act(() => api.patch(`/properties/${id}/featured`, { featured: !p.featured }), "Updated"); load(); }} data-testid="toggle-featured-btn">{p.featured ? "Unfeature" : "Feature on homepage"}</button>}
       </PageHeader>
       <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
@@ -56,7 +57,7 @@ export default function ErpProperty() {
       <FormDialog open={dlg === "edit"} onClose={() => setDlg("")} title="Edit property" fields={propFields(can("owners") ? owners : [], users, branches).filter((f) => p[f.name] !== undefined || f.name.endsWith("_text") || true)} initial={{ ...p, amenities_text: (p.amenities || []).join(", "), images_text: (p.images || []).join(", ") }} onSubmit={async (v) => { await api.patch(`/properties/${id}`, toPropBody(v)); load(); }} />
       <FormDialog open={dlg === "verify"} onClose={() => setDlg("")} title="Ownership verification & marketing authorisation" submitLabel="Record verification" initial={{ ownership_verified: false, authorization_signed: false, marketing_authorized: false, authorization_expiry: exp || "" }}
         fields={[{ name: "ownership_verified", label: "Ownership documents verified", type: "checkbox" }, { name: "authorization_signed", label: "Owner authorisation signed", type: "checkbox" }, { name: "marketing_authorized", label: "Owner authorises marketing / publication", type: "checkbox" }, { name: "authorization_expiry", label: "Authorisation expiry", type: "date", required: true }, { name: "notes", label: "Notes", type: "textarea", full: true }]}
-        onSubmit={async (v) => { const r = await api.post(`/properties/${id}/verify`, v); act(async () => r, r.data.verification_result === "verified" ? "Property verified" : "Verification recorded as rejected"); load(); }} />
+        onSubmit={async (v) => { const r = await api.post(`/properties/${id}/verify`, v); act(async () => r, r.data.verification_result === "verified" ? "Property verified" : "Recorded as not verified: ownership and signed authorisation are both needed"); load(); }} />
     </div>
   );
 }

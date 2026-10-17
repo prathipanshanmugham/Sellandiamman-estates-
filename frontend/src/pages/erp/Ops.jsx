@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { api, fmtDate, fmtDateTime, inr, label, opts } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { useDialog } from "../../lib/dialogs";
 import { PageHeader, DataTable, Badge, FormDialog, Modal, Facts, useList, act } from "../../components/erp/kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 
@@ -8,6 +9,7 @@ const NEXT = { open: ["assigned", "cancelled"], assigned: ["in_progress", "cance
 
 export function Maintenance() {
   const { can } = useAuth();
+  const dialog = useDialog();
   const [open, setOpen] = useState("");
   const [sel, setSel] = useState(null);
   const { rows, reload } = useList("/work-orders");
@@ -27,9 +29,9 @@ export function Maintenance() {
           <Facts items={[["Property", sel.property_title], ["Status", <Badge v={sel.status} testid="workorder-status" />], ["Priority", label(sel.priority)], ["Vendor", vendors.find((v) => v.id === sel.vendor_id)?.name], ["Quote", sel.quote_amount != null ? inr(sel.quote_amount) : "-"], ["Actual cost", sel.actual_cost != null ? inr(sel.actual_cost) : "-"], ["Charge to", label(sel.charge_to)], ["Description", sel.description]]} />
           {w && <div className="flex flex-wrap items-end gap-2">
             <div><label className="lbl">Vendor</label><select className="inp" value={sel.vendor_id || ""} onChange={(e) => update({ vendor_id: e.target.value || null }, "Vendor assigned")} data-testid="wo-vendor-select"><option value="">—</option>{vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
-            <button className="btn-line btn-sm" onClick={() => { const q = window.prompt("Vendor quotation (₹)"); if (q) update({ quote_amount: Number(q) }, "Quote saved"); }} data-testid="wo-quote-btn">Add quote</button>
-            {(NEXT[sel.status] || []).map((s) => <button key={s} className="btn-dark btn-sm" data-testid={`wo-status-${s}`} onClick={() => { if (s === "completed") { const c = window.prompt("Actual cost (₹)", sel.quote_amount || 0); if (c !== null) update({ status: s, actual_cost: Number(c) }, "Completed"); } else update({ status: s }, `Moved to ${label(s)}`); }}>{label(s)}</button>)}
-            <button className="btn-line btn-sm" onClick={() => { const n = window.prompt("Note"); if (n) update({ note: n }); }}>Add note</button>
+            <button className="btn-line btn-sm" onClick={async () => { const q = await dialog.ask({ title: "Vendor quotation", label: "Quoted amount (₹)", type: "number", initial: sel.quote_amount ?? "" }); if (q != null) update({ quote_amount: q }, "Quote saved"); }} data-testid="wo-quote-btn">{sel.quote_amount != null ? "Change quote" : "Add quote"}</button>
+            {(NEXT[sel.status] || []).map((s) => <button key={s} className="btn-dark btn-sm" data-testid={`wo-status-${s}`} onClick={async () => { if (s === "completed") { const c = await dialog.ask({ title: "Complete work order", body: sel.charge_to === "owner" ? "The cost is recovered from the owner in their next statement." : "The cost is booked as a company maintenance expense.", label: "Actual cost (₹)", type: "number", initial: sel.quote_amount || 0, okLabel: "Mark completed" }); if (c != null) update({ status: s, actual_cost: c }, "Completed"); } else update({ status: s }, `Moved to ${label(s)}`); }}>{label(s)}</button>)}
+            <button className="btn-line btn-sm" onClick={async () => { const n = await dialog.ask({ title: "Add a note", label: "Note", type: "textarea" }); if (n) update({ note: n }, "Note added"); }}>Add note</button>
           </div>}
           <div>{sel.history?.map((h, i) => <p key={i} className="border-b border-slate-100 py-1 text-xs text-slate-600">{fmtDateTime(h.at)} · {h.by} · {h.event}</p>)}</div>
         </div>}
@@ -50,10 +52,13 @@ function preview(v) {
 
 export function ShortStay() {
   const { can } = useAuth();
+  const dialog = useDialog();
   const [open, setOpen] = useState(false);
+  const [cancel, setCancel] = useState(null);
   const [sel, setSel] = useState(null);
   const { rows, reload } = useList("/bookings");
-  const { rows: props } = useList("/properties", { transaction: "short_stay" });
+  const { rows: allProps } = useList(can("properties") ? "/properties" : "/branches", can("properties") ? { transaction: "short_stay" } : undefined);
+  const props = allProps.filter((p) => p.code);
   const w = can("shortstay", "w");
   const occ = useMemo(() => { const live = rows.filter((b) => b.status !== "cancelled"); const nights = live.reduce((s, b) => s + b.nights, 0); return { nights, adr: nights ? live.reduce((s, b) => s + b.room_revenue, 0) / nights : 0, fees: live.reduce((s, b) => s + b.management_fee, 0) }; }, [rows]);
   const doAct = async (fn, msg) => { const r = await act(fn, msg); if (r) { reload(); setSel(null); } };
@@ -68,12 +73,14 @@ export function ShortStay() {
             {sel.status === "confirmed" && <button className="btn-line btn-sm" onClick={() => doAct(() => api.patch(`/bookings/${sel.id}/status`, { status: "checked_in" }), "Checked in")} data-testid="checkin-btn">Check in</button>}
             {sel.status === "checked_in" && <button className="btn-line btn-sm" onClick={() => doAct(() => api.patch(`/bookings/${sel.id}/status`, { status: "completed" }), "Checked out")} data-testid="checkout-btn">Check out</button>}
             {sel.status === "completed" && !sel.settled && <button className="btn-dark btn-sm" onClick={() => doAct(() => api.post(`/bookings/${sel.id}/settle`), "Settlement posted")} data-testid="settle-booking-btn">Post owner settlement</button>}
-            {sel.status === "confirmed" && <button className="btn-line btn-sm" onClick={() => { const reason = window.prompt("Cancellation reason"); if (!reason) return; const refund = Number(window.prompt("Refund amount (₹)", "0") || 0); doAct(() => api.post(`/bookings/${sel.id}/cancel`, { reason, refund_amount: refund }), "Cancellation processed"); }} data-testid="cancel-booking-btn">Cancel</button>}
-            <button className="btn-line btn-sm" onClick={() => { const note = window.prompt("Guest issue"); if (note) doAct(() => api.post(`/bookings/${sel.id}/issues`, { note }), "Issue logged"); }}>Log guest issue</button>
+            {sel.status === "confirmed" && <button className="btn-line btn-sm" onClick={() => setCancel(sel)} data-testid="cancel-booking-btn">Cancel</button>}
+            <button className="btn-line btn-sm" onClick={async () => { const note = await dialog.ask({ title: "Log a guest issue", label: "What happened?", type: "textarea" }); if (note) doAct(() => api.post(`/bookings/${sel.id}/issues`, { note }), "Issue logged"); }}>Log guest issue</button>
           </div>}
           {sel.issues?.map((i, k) => <p key={k} className="text-xs text-slate-600">{fmtDateTime(i.at)} · {i.by}: {i.note}</p>)}
         </div>}
       </Modal>
+      <FormDialog open={!!cancel} onClose={() => setCancel(null)} title={`Cancel booking ${cancel?.code || ""}`} submitLabel="Cancel booking" initial={{ refund_amount: 0 }} fields={[{ name: "reason", label: "Reason", required: true, full: true }, { name: "refund_amount", label: "Refund to guest (₹)", type: "number", required: true, hint: "Refunds may need a director's approval." }]}
+        onSubmit={async (v) => { const r = await api.post(`/bookings/${cancel.id}/cancel`, { reason: v.reason, refund_amount: v.refund_amount || 0 }); act(async () => r, r.data.approval_required ? "Refund sent for approval" : "Booking cancelled"); reload(); setSel(null); }} />
       <FormDialog open={open} onClose={() => setOpen(false)} title="New reservation" initial={{ guests: 2, platform: "direct", discount: 0, cleaning_fee: 0, platform_fee: 0, operating_costs: 0 }} fields={[{ name: "property_id", label: "Property", type: "select", required: true, full: true, options: props.map((p) => ({ value: p.id, label: `${p.code} · ${p.title}` })) }, { name: "guest_name", label: "Guest name", required: true }, { name: "guest_phone", label: "Guest mobile", required: true }, { name: "guests", label: "Guests", type: "number", required: true }, { name: "platform", label: "Platform", type: "select", required: true, options: opts(["direct", "airbnb", "booking_com", "makemytrip", "other"]) }, { name: "check_in", label: "Check-in", type: "date", required: true }, { name: "check_out", label: "Check-out", type: "date", required: true }, { name: "nightly_rate", label: "Nightly rate (₹)", type: "number", required: true }, { name: "discount", label: "Discount (₹)", type: "number" }, { name: "cleaning_fee", label: "Cleaning fee (₹)", type: "number" }, { name: "platform_fee", label: "Platform fee (₹)", type: "number" }, { name: "operating_costs", label: "Operating costs (₹)", type: "number" }, { name: "mgmt_fee_pct", label: "Mgmt fee % (blank = property default)", type: "number" }]}
         onSubmit={async (v) => { await api.post("/bookings", v); reload(); }}>
         {(v) => { const p = preview({ ...v, mgmt_fee_pct: v.mgmt_fee_pct ?? props.find((x) => x.id === v.property_id)?.mgmt_fee_pct }); return p && <p className="bg-slate-50 p-3 text-sm" data-testid="booking-preview">{p.n} nights · gross {inr(p.gross)} · net {inr(p.net)} · fee {inr(p.fee)} · owner {inr(p.owner)}</p>; }}

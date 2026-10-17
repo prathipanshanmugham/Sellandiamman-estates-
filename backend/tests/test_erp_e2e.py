@@ -7,10 +7,11 @@ from datetime import date, timedelta
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
+BASE_URL = (os.environ.get("TEST_BASE_URL") or os.environ.get("REACT_APP_BACKEND_URL") or "http://localhost:8001").rstrip("/")
 API = f"{BASE_URL}/api"
-ADMIN = ("prathipanshanmugham33@gmail.com", "Sellandi@Erode2026")
-DEMO_PW = "Demo@12345"
+# Credentials come from the environment (same values as the backend .env); never hard-code real passwords here.
+ADMIN = (os.environ.get("ADMIN_EMAIL", "admin@estates.test"), os.environ.get("ADMIN_PASSWORD", "Admin@Estates2026"))
+DEMO_PW = os.environ.get("DEMO_PASSWORD", "Demo@12345")
 S = {}  # shared state
 _sessions = {}
 
@@ -52,7 +53,9 @@ class TestAuth:
         r = s.post(f"{API}/auth/login", json={"email": "auditor@demo.sellandiamman.test", "password": DEMO_PW})
         assert r.status_code == 200
         sc = r.headers.get("set-cookie", "")
-        assert "access_token=" in sc and "httponly" in sc.lower() and "secure" in sc.lower()
+        assert "access_token=" in sc and "httponly" in sc.lower()
+        if os.environ.get("COOKIE_SECURE", "true").lower() != "false":
+            assert "secure" in sc.lower()
         me = s.get(f"{API}/auth/me")
         assert me.status_code == 200 and me.json()["role"] == "auditor"
         # logout revokes server side, even if token reused

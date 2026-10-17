@@ -9,7 +9,7 @@ export function Deals() {
   const { can } = useAuth();
   const [open, setOpen] = useState(false);
   const { rows } = useList("/deals");
-  const { rows: props } = useList("/properties");
+  const { rows: props } = useList(can("properties") && can("deals", "w") ? "/properties" : "/branches");
   return (
     <div>
       <PageHeader title="Deals" sub="Sale, rental and commercial lease transactions. Revenue = commission only.">{can("deals", "w") && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-deal-btn">New deal</button>}</PageHeader>
@@ -59,7 +59,7 @@ export function DealDetail() {
     <div className="space-y-6" data-testid="deal-detail">
       <PageHeader title={d.title} sub={`${d.code} · ${label(d.deal_type)} · ${d.property_title}`}>
         <Badge v={d.stage} testid="deal-stage-badge" />
-        <button className="btn-line btn-sm" onClick={() => openFile(`/deals/${id}/summary.pdf`)} data-testid="deal-pdf-btn">Deal summary PDF</button>
+        <button className="btn-line btn-sm" onClick={() => openFile(`/deals/${id}/summary.pdf`, { name: `Deal summary ${d.code}` })} data-testid="deal-pdf-btn">Deal summary PDF</button>
         {w && open && <button className="btn-dark btn-sm" onClick={async () => { await act(() => api.post(`/deals/${id}/close`), "Deal closed"); load(); }} data-testid="close-deal-btn">Close deal (won)</button>}
         {w && open && <button className="btn-line btn-sm" onClick={() => setDlg("cancel")} data-testid="cancel-deal-btn">Cancel / dispute</button>}
         {(w || can("finance", "w")) && d.stage === "won" && !d.invoice && <button className="btn-dark btn-sm" onClick={async () => { await act(() => api.post(`/deals/${id}/invoice`), "Invoice generated"); load(); }} data-testid="generate-invoice-btn">Generate invoice</button>}
