@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
 from core import (db, now_iso, new_id, next_code, normalize_phone, rate_limit, notify, notify_roles, get_settings,
-                  audit, save_upload, client_ip, logger, IMAGE_TYPES, UPLOAD_DIR, SITE_URL)
+                  audit, save_upload, client_ip, logger, IMAGE_TYPES, UPLOAD_DIR, SITE_URL, branch_for_place)
 from routes_crm import create_lead, add_activity
 from routes_props import CATEGORIES
 from pdf import make_brochure, inr, inr_short
@@ -62,9 +62,14 @@ def public_view(p):
 
 @router.get("/public/settings")
 async def public_settings():
+    from routes_cms import published
     s = await get_settings()
+    site = await published()
     return {**{k: s.get(k) for k in PUBLIC_SETTINGS}, "turnstile_site_key": TURNSTILE_SITE_KEY or None,
-            "site_url": SITE_URL or None}
+            "site_url": SITE_URL or None, "announcement": site["announcement"], "testimonials": site["testimonials"],
+            "hero_title": site["hero"]["title"], "hero_subtitle": site["hero"]["subtitle"],
+            "seo_title": site["seo"]["title"], "seo_description": site["seo"]["description"],
+            "footer_tagline": site["footer_tagline"]}
 
 
 @router.get("/public/properties")
@@ -209,7 +214,7 @@ async def enquiry(body: EnquiryIn, request: Request):
              "property_title": prop["title"], "property_code": prop["code"], "scheduled_at": when,
              "preferred_slot": body.preferred_slot, "status": "requested", "notes": body.message,
              "agent_id": prop.get("assigned_agent") or lead.get("assigned_to"), "source": "website",
-             "created_at": now_iso()}
+             "branch_id": lead.get("branch_id"), "created_at": now_iso()}
         await db.site_visits.insert_one(dict(v))
         await add_activity(lead["id"], "site_visit", f"Visit requested on the website for {when} at {prop['code']}")
         if v["agent_id"]:
@@ -231,6 +236,8 @@ async def owner_submission(
         category: str = Form(...), transaction: str = Form(...), price: Optional[float] = Form(None),
         description: Optional[str] = Form(None, max_length=3000), services: Optional[str] = Form(None),
         declaration: bool = Form(...), website: Optional[str] = Form(""), cf_token: Optional[str] = Form(None),
+        lat: Optional[float] = Form(None), lng: Optional[float] = Form(None), accuracy_m: Optional[float] = Form(None),
+        location_source: Optional[str] = Form(None, max_length=20),
         photos: List[UploadFile] = File(default=[])):
     rate_limit(request, "owner_form", 4, 900)
     if website:
@@ -247,6 +254,11 @@ async def owner_submission(
     if len(photos) > 6:
         raise HTTPException(422, "Up to 6 photos allowed")
     phone_n = normalize_phone(phone)
+    city, locality = city.strip(), locality.strip()
+    from routes_props import geo_fields
+    geo = geo_fields({"lat": lat, "lng": lng, "accuracy_m": accuracy_m,
+                      "source": "owner_gps" if location_source == "gps" else "owner_pin", "captured_by": f"Owner ({name.strip()[:60]})"},
+                     "approximate") if lat is not None and lng is not None else {}
     saved = [await save_upload(p, IMAGE_TYPES, 5 * 1024 * 1024) for p in photos if p.filename]
     owner = await db.owners.find_one({"phone": phone_n}, {"_id": 0})
     owner_match = bool(owner)
@@ -255,6 +267,15 @@ async def owner_submission(
                  "email": email, "preferred_contact": preferred_contact, "kind": "individual", "is_nri": False,
                  "source": "owner_submission", "created_at": now_iso(), "deleted": False}
         await db.owners.insert_one(dict(owner))
+    from routes_customers import link_customer
+    await link_customer("owners", owner["id"], {"name": owner["name"], "phone": phone_n, "email": email,
+                                                "types": ["owner", "landlord"], "source": "website", "city": city})
+    branch_id = await branch_for_place(city, locality)
+    # an owner's new locality is added for staff to review before it shows on the website
+    if await db.locations.find_one({"kind": "city", "name": {"$regex": f"^{re.escape(city)}$", "$options": "i"}}):
+        from routes_branches import ensure_place
+        await ensure_place(city, locality, pincode, (geo.get("geo") or {}).get("lat"), (geo.get("geo") or {}).get("lng"),
+                           branch_id, "owner_submission", active=False)
     pid = new_id()
     prop = {"id": pid, "code": await next_code("property", "SE-P-"), "title": f"{category.title()} in {locality}",
             "category": category, "transaction": transaction, "ownership_type": "third_party", "owner_id": owner["id"],
@@ -262,10 +283,9 @@ async def owner_submission(
             "price_unit": "total" if transaction == "sale" else "per_month", "description_public": "",
             "owner_description": description, "requested_services": services, "status": "verification_pending",
             "source": "owner_submission", "images": [], "amenities": [], "verification": {"status": "pending"},
-            "owner_match_unverified": owner_match, "submitted_name": name.strip(),
-            "branch_id": {"erode": "br-erode", "perundurai": "br-perundurai"}.get(city.strip().lower()),
+            "owner_match_unverified": owner_match, "submitted_name": name.strip(), "branch_id": branch_id,
             "authorization": {}, "publication_history": [], "created_at": now_iso(), "updated_at": now_iso(),
-            "deleted": False, "featured": False}
+            "deleted": False, "featured": False, "location_public": "approximate", **geo}
     await db.properties.insert_one(dict(prop))
     for s in saved:
         await db.documents.insert_one({"id": new_id(), **s, "entity_type": "property", "entity_id": pid,
@@ -273,12 +293,12 @@ async def owner_submission(
                                        "uploaded_by": None, "created_at": now_iso()})
     lead, _ = await create_lead({"name": name.strip(), "phone": phone_n, "email": email, "source": "website",
                                  "interest": "sell" if transaction == "sale" else "management",
-                                 "customer_type": "seller" if transaction == "sale" else "landlord",
+                                 "customer_type": "seller" if transaction == "sale" else "landlord", "branch_id": branch_id,
                                  "property_id": pid, "requirements": description, "preferred_contact": preferred_contact},
                                 None, f"Owner submitted property {prop['code']} for review")
-    await audit(None, "owner_submission", "properties", pid, {"photos": len(saved)})
+    await audit(None, "owner_submission", "properties", pid, {"photos": len(saved), "location": bool(geo)})
     await notify_roles(["super_admin", "director", "branch_manager"], f"Property submitted for verification: {prop['code']}",
-                       f"{name} - {locality}, {city}", f"/erp/properties/{pid}", dedupe=f"sub:{pid}")
+                       f"{name} - {locality}, {city}", f"/erp/properties/{pid}", dedupe=f"sub:{pid}", branch_id=branch_id)
     return {"ok": True, "reference": prop["code"]}
 
 
@@ -368,26 +388,3 @@ async def share_post(slug: str, request: Request):
                                       f"{base}/insights"), media_type="text/html")
     return Response(_preview_html(p["title"], p.get("excerpt") or "", _abs(p.get("cover_image"), base), f"{base}/insights/{slug}"),
                     media_type="text/html", headers={"Cache-Control": "public, max-age=600"})
-
-
-@router.get("/sitemap.xml")
-async def sitemap():
-    site = SITE_URL
-    pages = ["", "/properties", "/services", "/list-property", "/tools", "/insights", "/about", "/contact", "/faq",
-             "/legal/privacy", "/legal/terms", "/legal/disclaimer", "/legal/cookies"]
-    pages += [f"/services/{s}" for s in ("buy-sell", "rental-brokerage", "property-management", "nri-services",
-                                          "short-stay", "commercial-industrial", "marketing-photography", "inspection-maintenance")]
-    props = await db.properties.find(base_filter(), {"_id": 0, "listing_id": 1, "updated_at": 1}).to_list(5000)
-    posts = await db.posts.find({"status": "published", "deleted": {"$ne": True}}, {"_id": 0, "slug": 1, "updated_at": 1}).to_list(2000)
-    urls = [(p, None) for p in pages]
-    urls += [(f"/properties/{p['listing_id']}", (p.get("updated_at") or "")[:10]) for p in props if p.get("listing_id")]
-    urls += [(f"/insights/{p['slug']}", (p.get("updated_at") or "")[:10]) for p in posts]
-    xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-    xml += "".join(f"<url><loc>{site}{u}</loc>{f'<lastmod>{m}</lastmod>' if m else ''}</url>" for u, m in urls) + "</urlset>"
-    return Response(xml, media_type="application/xml")
-
-
-@router.get("/robots.txt")
-async def robots():
-    return Response(f"User-agent: *\nAllow: /\nAllow: /s/\nDisallow: /erp\nDisallow: /owner\nDisallow: /shortlist\nDisallow: /api/\n"
-                    f"Sitemap: {SITE_URL}/sitemap.xml\n", media_type="text/plain")

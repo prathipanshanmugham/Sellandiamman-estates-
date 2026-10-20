@@ -5,8 +5,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from pymongo.errors import DuplicateKeyError
 from core import db, now_iso, new_id, next_code, require, can, scope, get_scoped, audit, post_ledger, notify, \
-    get_settings, today_ist, normalize_phone, notify_roles
-from logic import calc_shortstay, calc_owner_statement, ranges_overlap
+    get_settings, today_ist, normalize_phone, notify_roles, check_branch
+from logic import calc_shortstay, calc_owner_statement, ranges_overlap, PLATFORMS
 from pdf import make_pdf, inr
 
 router = APIRouter()
@@ -99,7 +99,7 @@ class VendorIn(BaseModel):
 class BookingIn(BaseModel):
     property_id: str
     guest_name: str = Field(min_length=2, max_length=120)
-    guest_phone: str
+    guest_phone: Optional[str] = None
     guest_email: Optional[str] = None
     guests: int = Field(1, ge=1, le=50)
     check_in: str = Field(pattern=DATE)
@@ -107,8 +107,9 @@ class BookingIn(BaseModel):
     nightly_rate: float = Field(gt=0)
     discount: float = Field(0, ge=0)
     cleaning_fee: float = Field(0, ge=0)
-    platform: str = Field("direct", pattern=r"^(direct|airbnb|booking_com|makemytrip|other)$")
-    platform_fee: float = Field(0, ge=0)
+    platform: str = Field("direct", pattern=r"^(" + "|".join(PLATFORMS) + r")$")
+    # blank = the platform's commission from the channel settings
+    platform_fee: Optional[float] = Field(None, ge=0)
     operating_costs: float = Field(0, ge=0)
     mgmt_fee_pct: Optional[float] = Field(None, ge=0, le=100)
     source_ref: Optional[str] = None
@@ -141,6 +142,7 @@ async def create_lease(body: LeaseIn, user=Depends(require("leases", "w"))):
     prop = await db.properties.find_one({"id": body.property_id, "deleted": {"$ne": True}}, {"_id": 0})
     if not prop:
         raise HTTPException(404, "Property not found")
+    check_branch(user, prop.get("branch_id"))
     clash = await db.leases.find_one({"property_id": body.property_id, "status": "active",
                                       "start_date": {"$lt": body.end_date}, "end_date": {"$gt": body.start_date}})
     if clash:
@@ -152,12 +154,18 @@ async def create_lease(body: LeaseIn, user=Depends(require("leases", "w"))):
     data["manager_id"] = data.get("manager_id") or prop.get("assigned_manager") or user["id"]
     lease = {"id": new_id(), "code": await next_code("lease", "SE-LS-"), **data, "owner_id": prop.get("owner_id"),
              "property_title": prop["title"], "property_code": prop["code"], "status": "active",
+             "branch_id": prop.get("branch_id"),
              "deposit_held": 0.0, "handovers": [], "issues": [],
              "schedule": build_schedule(body.start_date, body.end_date, body.rent, body.due_day, body.escalation_pct,
                                         body.escalation_every_months),
              "created_at": now_iso()}
     await db.leases.insert_one(dict(lease))
     await db.properties.update_one({"id": prop["id"]}, {"$set": {"occupancy": "occupied", "service_type": "management"}})
+    from routes_customers import link_customer
+    c = await link_customer("leases", lease["id"], {"name": body.tenant_name, "phone": data["tenant_phone"], "email": body.tenant_email,
+                                                    "types": ["tenant"], "source": "lease", "branch_id": lease["branch_id"],
+                                                    "kind": "business" if body.tenant_kind == "business" else "individual"}, user)
+    lease["customer_id"] = c and c["id"]
     await audit(user, "lease_created", "leases", lease["id"])
     return lease
 
@@ -202,7 +210,7 @@ async def record_rent(lid: str, body: RentIn, user=Depends(require("leases", "w"
     await db.leases.update_one({"id": lid, "schedule.period": body.period}, {"$inc": {"schedule.$.paid": body.amount}})
     await post_ledger("owner_funds", "in", body.amount, "rent", p["id"],
                       f"Rent {body.period} {lease['code']} received on behalf of owner", user, lease.get("owner_id"),
-                      "rent_collected")
+                      "rent_collected", lease.get("branch_id"))
     await audit(user, "rent_recorded", "leases", lid, {"amount": body.amount, "period": body.period})
     return p
 
@@ -242,7 +250,7 @@ async def deposit(lid: str, body: DepositIn, user=Depends(require("leases", "w")
     await db.leases.update_one({"id": lid}, {"$inc": {"deposit_held": delta}})
     await post_ledger("deposits", body.direction, body.amount, "lease", lid,
                       f"Deposit {'received' if body.direction == 'in' else 'refunded'} {lease['code']}: {body.reason}",
-                      user, lease["tenant_name"], "tenant_deposit")
+                      user, lease["tenant_name"], "tenant_deposit", lease.get("branch_id"))
     return {"ok": True, "deposit_held": round(lease.get("deposit_held", 0) + delta, 2)}
 
 
@@ -272,9 +280,28 @@ async def _statement_data(oid, month):
     props = [p["id"] for p in await db.properties.find({"owner_id": oid}, {"_id": 0, "id": 1}).to_list(500)]
     wos = await db.work_orders.find({"property_id": {"$in": props}, "charge_to": "owner", "status": {"$in": ["completed", "closed"]},
                                      "completed_at": {"$regex": f"^{month}"}}, {"_id": 0}).to_list(500)
-    exps = [{"amount": w.get("actual_cost") or 0, "description": f"{w['code']} {w['title']}"} for w in wos]
+    exps = [{"amount": w.get("actual_cost") or 0, "description": f"{w['code']} {w['title']}", "property_id": w["property_id"]}
+            for w in wos]
     calc = calc_owner_statement([{"amount": r["amount"], "fee_pct": r.get("mgmt_fee_pct", 0)} for r in rents], exps)
     return rents, exps, calc
+
+
+async def _by_branch(oid, rents, exps):
+    """Splits a statement by the branch of each property, so every branch's books balance."""
+    pb = {p["id"]: p.get("branch_id") for p in await db.properties.find({"owner_id": oid}, {"_id": 0, "id": 1, "branch_id": 1}).to_list(500)}
+    out = {}
+    for r in rents:
+        b = out.setdefault(pb.get(r["property_id"]) or "_none", {"rent": 0.0, "fee": 0.0, "exp": 0.0})
+        b["rent"] += r["amount"]
+        b["fee"] += r["amount"] * float(r.get("mgmt_fee_pct") or 0) / 100
+    for e in exps:
+        b = out.setdefault(pb.get(e["property_id"]) or "_none", {"rent": 0.0, "fee": 0.0, "exp": 0.0})
+        b["exp"] += float(e["amount"] or 0)
+    for b in out.values():
+        for k in ("rent", "fee", "exp"):
+            b[k] = round(b[k], 2)
+        b["net"] = round(b["rent"] - b["fee"] - b["exp"], 2)
+    return out
 
 
 @router.get("/owners/{oid}/statement")
@@ -295,20 +322,24 @@ async def settle_statement(oid: str, body: dict, user=Depends(require("leases", 
     rents, exps, calc = await _statement_data(oid, month)
     if calc["rent_collected"] <= 0:
         raise HTTPException(422, "No rent collected for this month")
+    split = await _by_branch(oid, rents, exps)
     st = {"id": new_id(), "code": await next_code("statement", "OS-", 5), "owner_id": oid, "owner_name": owner["name"],
-          "month": month, **calc, "payout_status": "pending_manual_transfer", "by": user["id"], "created_at": now_iso()}
+          "month": month, **calc, "by_branch": split, "payout_status": "pending_manual_transfer", "by": user["id"],
+          "created_at": now_iso()}
     try:
         await db.owner_statements.insert_one(dict(st))
     except DuplicateKeyError:
         raise HTTPException(409, "Statement already settled for this month")
-    await post_ledger("owner_funds", "out", calc["management_fee"], "owner_statement", st["id"],
-                      f"Management fee {month} transferred to company", user, oid, "mgmt_fee")
-    await post_ledger("company", "in", calc["management_fee"], "owner_statement", st["id"],
-                      f"Management fee {month} – {owner['name']}", user, oid, "revenue:management")
-    await post_ledger("owner_funds", "out", calc["expenses"], "owner_statement", st["id"],
-                      f"Maintenance recovered {month}", user, oid, "expense_recovery")
-    await post_ledger("company", "in", calc["expenses"], "owner_statement", st["id"],
-                      f"Maintenance cost recovered from owner {month}", user, oid, "reimbursement")
+    for b, v in split.items():
+        b = None if b == "_none" else b
+        await post_ledger("owner_funds", "out", v["fee"], "owner_statement", st["id"],
+                          f"Management fee {month} transferred to company", user, oid, "mgmt_fee", b)
+        await post_ledger("company", "in", v["fee"], "owner_statement", st["id"],
+                          f"Management fee {month} – {owner['name']}", user, oid, "revenue:management", b)
+        await post_ledger("owner_funds", "out", v["exp"], "owner_statement", st["id"],
+                          f"Maintenance recovered {month}", user, oid, "expense_recovery", b)
+        await post_ledger("company", "in", v["exp"], "owner_statement", st["id"],
+                          f"Maintenance cost recovered from owner {month}", user, oid, "reimbursement", b)
     await audit(user, "owner_statement_settled", "owners", oid, {"month": month, **calc})
     return st
 
@@ -330,8 +361,11 @@ async def mark_paid(sid: str, body: dict, user=Depends(require("finance", "w")))
                                                        "paid_at": now_iso()}})
     if not r.modified_count:
         raise HTTPException(409, "Payout already recorded")
-    await post_ledger("owner_funds", "out", st["net_payable"], "owner_statement", sid,
-                      f"Owner payout {st['month']} ref {body['reference']}", user, st["owner_id"], "owner_payout")
+    split = st.get("by_branch") or {"_none": {"net": st["net_payable"]}}
+    for b, v in split.items():
+        await post_ledger("owner_funds", "out", v["net"], "owner_statement", sid,
+                          f"Owner payout {st['month']} ref {body['reference']}", user, st["owner_id"], "owner_payout",
+                          None if b == "_none" else b)
     await audit(user, "owner_payout", "owners", st["owner_id"], {"reference": body["reference"]})
     return {"ok": True}
 
@@ -369,15 +403,19 @@ WO_FLOW = {"open": ["assigned", "cancelled"], "assigned": ["in_progress", "cance
 @router.get("/work-orders")
 async def list_wo(status: Optional[str] = None, user=Depends(require("maintenance", "r"))):
     f = {"status": status} if status else {}
+    f.update(scope(user, "maintenance"))
     return await db.work_orders.find(f, {"_id": 0}).sort("created_at", -1).to_list(2000)
 
 
 @router.post("/work-orders")
 async def create_wo(body: WorkOrderIn, user=Depends(require("maintenance", "w"))):
-    prop = await db.properties.find_one({"id": body.property_id}, {"_id": 0, "title": 1, "code": 1, "assigned_manager": 1})
+    prop = await db.properties.find_one({"id": body.property_id}, {"_id": 0, "title": 1, "code": 1, "assigned_manager": 1,
+                                                                   "branch_id": 1})
     if not prop:
         raise HTTPException(404, "Property not found")
+    check_branch(user, prop.get("branch_id"))
     wo = {"id": new_id(), "code": await next_code("wo", "WO-", 5), **body.model_dump(), "property_title": prop["title"],
+          "branch_id": prop.get("branch_id"),
           "status": "assigned" if body.vendor_id else "open", "actual_cost": None,
           "history": [{"at": now_iso(), "by": user["name"], "event": "Created"}], "created_by": user["id"],
           "created_at": now_iso()}
@@ -389,7 +427,7 @@ async def create_wo(body: WorkOrderIn, user=Depends(require("maintenance", "w"))
 
 @router.patch("/work-orders/{wid}")
 async def update_wo(wid: str, body: dict, user=Depends(require("maintenance", "w"))):
-    wo = await db.work_orders.find_one({"id": wid}, {"_id": 0})
+    wo = await db.work_orders.find_one({"id": wid, **scope(user, "maintenance")}, {"_id": 0})
     if not wo:
         raise HTTPException(404, "Work order not found")
     upd = {k: body[k] for k in ("vendor_id", "quote_amount", "due_date", "priority", "charge_to") if k in body}
@@ -409,7 +447,7 @@ async def update_wo(wid: str, body: dict, user=Depends(require("maintenance", "w
                                                                                       "event": ev}}})
     if upd.get("status") == "completed" and upd["actual_cost"] > 0:
         await post_ledger("company", "out", upd["actual_cost"], "work_order", wid, f"Vendor paid {wo['code']}", user,
-                          wo.get("vendor_id"), "expense:maintenance")
+                          wo.get("vendor_id"), "expense:maintenance", wo.get("branch_id"))
     await audit(user, "work_order_updated", "maintenance", wid, upd)
     return {**wo, **upd}
 
@@ -462,61 +500,165 @@ def _booking_view(user, b):
     return b
 
 
+async def blocked_by(property_id, check_in, check_out, ignore_block=None):
+    """A blocked period (owner stay, maintenance, dates closed on a platform) overlapping these dates."""
+    return await db.stay_blocks.find_one({"property_id": property_id, "start": {"$lt": check_out}, "end": {"$gt": check_in},
+                                          "id": {"$ne": ignore_block}}, {"_id": 0})
+
+
+async def platform_commission(property_id, platform):
+    ch = await db.stay_channels.find_one({"property_id": property_id, "platform": platform}, {"_id": 0, "commission_pct": 1})
+    if ch and ch.get("commission_pct") is not None:
+        return float(ch["commission_pct"])
+    return float(PLATFORMS.get(platform, ("", 0))[1])
+
+
 @router.get("/bookings")
-async def list_bookings(property_id: Optional[str] = None, user=Depends(require("shortstay", "r"))):
+async def list_bookings(property_id: Optional[str] = None, needs_details: bool = False, status: Optional[str] = None,
+                        user=Depends(require("shortstay", "r"))):
     f = {"property_id": property_id} if property_id else {}
-    rows = await db.bookings.find(f, {"_id": 0}).sort("check_in", -1).to_list(2000)
+    f.update(scope(user, "shortstay"))
+    if needs_details:
+        f["needs_details"] = True
+        f["status"] = {"$nin": ["cancelled", "declined"]}
+    if status:
+        f["status"] = status
+    rows = await db.bookings.find(f, {"_id": 0}).sort("check_in", -1).to_list(5000)
     return [_booking_view(user, b) for b in rows]
 
 
-@router.post("/bookings")
-async def create_booking(body: BookingIn, user=Depends(require("shortstay", "w"))):
+async def make_booking(body: BookingIn, user, status="confirmed", source="staff", extra=None, check_overlap=True):
+    """Creates a booking. Confirmed bookings hold their nights; 'requested' (website) and 'conflict' (a platform
+    calendar clashing with another booking) do not, until someone confirms them."""
     prop = await db.properties.find_one({"id": body.property_id, "transaction": "short_stay"}, {"_id": 0})
     if not prop:
         raise HTTPException(404, "Short-stay property not found")
+    if user and user.get("role") not in (None, "system"):
+        check_branch(user, prop.get("branch_id"))
     if prop.get("max_guests") and body.guests > prop["max_guests"]:
         raise HTTPException(422, f"Maximum {prop['max_guests']} guests allowed")
     pct = body.mgmt_fee_pct if body.mgmt_fee_pct is not None else (prop.get("mgmt_fee_pct") or 0)
+    platform_fee = body.platform_fee
+    if platform_fee is None:
+        gross_est = body.nightly_rate * len(list(nights_between(body.check_in, body.check_out))) - body.discount + body.cleaning_fee
+        platform_fee = round(max(0, gross_est) * await platform_commission(prop["id"], body.platform) / 100, 2)
     try:
         calc = calc_shortstay(date.fromisoformat(body.check_in), date.fromisoformat(body.check_out), body.nightly_rate,
-                              body.discount, body.cleaning_fee, body.platform_fee, body.operating_costs, pct)
+                              body.discount, body.cleaning_fee, platform_fee, body.operating_costs, pct)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    existing = await db.bookings.find({"property_id": body.property_id, "status": {"$ne": "cancelled"}},
-                                      {"_id": 0, "check_in": 1, "check_out": 1, "code": 1}).to_list(5000)
-    for b in existing:
-        if ranges_overlap(body.check_in, body.check_out, b["check_in"], b["check_out"]):
-            raise HTTPException(409, f"Dates overlap with booking {b['code']}")
+    if check_overlap and status == "confirmed":
+        blk = await blocked_by(prop["id"], body.check_in, body.check_out)
+        if blk:
+            raise HTTPException(409, f"Dates are blocked ({blk.get('reason', 'closed').replace('_', ' ')}) from {blk['start']} to {blk['end']}")
+        existing = await db.bookings.find({"property_id": body.property_id, "status": {"$in": ["confirmed", "checked_in", "completed"]}},
+                                          {"_id": 0, "check_in": 1, "check_out": 1, "code": 1}).to_list(5000)
+        for b in existing:
+            if ranges_overlap(body.check_in, body.check_out, b["check_in"], b["check_out"]):
+                raise HTTPException(409, f"Dates overlap with booking {b['code']}")
     data = body.model_dump()
-    data["guest_phone"] = normalize_phone(data["guest_phone"])
+    data["guest_phone"] = normalize_phone(data["guest_phone"]) if data.get("guest_phone") else None
     data["mgmt_fee_pct"] = pct
+    data["platform_fee"] = platform_fee
     bk = {"id": new_id(), "code": await next_code("booking", "SE-B-", 5), **data, **calc,
-          "property_title": prop["title"], "owner_id": prop.get("owner_id"), "status": "confirmed", "settled": False,
-          "issues": [], "created_by": user["id"], "created_at": now_iso()}
-    await reserve_nights(bk)
+          "property_title": prop["title"], "owner_id": prop.get("owner_id"), "branch_id": prop.get("branch_id"),
+          "status": status, "source": source, "needs_details": False, "amounts_estimated": False, "settled": False,
+          "issues": [], "created_by": user["id"] if user else None, "created_at": now_iso(), **(extra or {})}
+    if status == "confirmed":
+        await reserve_nights(bk)
     try:
         await db.bookings.insert_one(dict(bk))
     except Exception:
         await release_nights(bk["id"])
         raise
-    await db.tasks.insert_one({"id": new_id(), "title": f"Turnover cleaning – {prop['title']} ({bk['code']})",
-                               "due_date": body.check_out, "priority": "high", "status": "open", "kind": "cleaning",
-                               "related_type": "booking", "related_id": bk["id"], "assigned_to": None,
-                               "created_by": user["id"], "created_at": now_iso(), "comments": []})
-    await audit(user, "booking_created", "shortstay", bk["id"])
+    if bk.get("guest_phone"):
+        from routes_customers import link_customer
+        c = await link_customer("bookings", bk["id"], {"name": bk["guest_name"], "phone": bk["guest_phone"], "email": bk.get("guest_email"),
+                                                       "types": ["guest"], "source": bk["platform"], "branch_id": bk["branch_id"]},
+                                user if user and user.get("id") else None)
+        bk["customer_id"] = c and c["id"]
+    if status == "confirmed":
+        await _cleaning_task(bk, prop, user)
+    await audit(user, "booking_created", "shortstay", bk["id"], {"source": source, "status": status})
     return bk
+
+
+async def _cleaning_task(bk, prop, user):
+    await db.tasks.insert_one({"id": new_id(), "title": f"Turnover cleaning – {prop['title']} ({bk['code']})",
+                               "due_date": bk["check_out"], "priority": "high", "status": "open", "kind": "cleaning",
+                               "related_type": "booking", "related_id": bk["id"], "assigned_to": None,
+                               "branch_id": prop.get("branch_id"), "created_by": user["id"] if user else None,
+                               "created_at": now_iso(), "comments": []})
+
+
+@router.post("/bookings")
+async def create_booking(body: BookingIn, user=Depends(require("shortstay", "w"))):
+    if not body.guest_phone:
+        raise HTTPException(422, "Guest mobile is required")
+    return await make_booking(body, user)
+
+
+async def _booking_for(user, bid):
+    b = await db.bookings.find_one({"id": bid, **scope(user, "shortstay")}, {"_id": 0})
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    return b
+
+
+@router.patch("/bookings/{bid}")
+async def edit_booking(bid: str, body: dict, user=Depends(require("shortstay", "w"))):
+    """Fill in a platform booking's guest and money details (calendar sync only brings the dates)."""
+    b = await _booking_for(user, bid)
+    if b.get("settled"):
+        raise HTTPException(422, "Settled bookings cannot be changed")
+    upd = {k: body[k] for k in ("guest_name", "guest_phone", "guest_email", "guests", "nightly_rate", "discount", "cleaning_fee",
+                                "platform_fee", "operating_costs", "mgmt_fee_pct", "source_ref", "notes", "platform") if k in body}
+    if "guest_phone" in upd:
+        upd["guest_phone"] = normalize_phone(upd["guest_phone"]) if upd["guest_phone"] else None
+    if upd.get("platform") and upd["platform"] not in PLATFORMS:
+        raise HTTPException(422, "Unknown platform")
+    m = {**b, **upd}
+    try:
+        calc = calc_shortstay(date.fromisoformat(m["check_in"]), date.fromisoformat(m["check_out"]), float(m["nightly_rate"]),
+                              float(m.get("discount") or 0), float(m.get("cleaning_fee") or 0), float(m.get("platform_fee") or 0),
+                              float(m.get("operating_costs") or 0), float(m.get("mgmt_fee_pct") or 0))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(422, str(e))
+    upd.update(calc)
+    complete = bool(m.get("guest_name") and m.get("guest_phone") and not str(m.get("guest_name")).startswith("Guest via"))
+    upd.update({"needs_details": not complete, "amounts_estimated": False if "nightly_rate" in body else b.get("amounts_estimated", False)})
+    await db.bookings.update_one({"id": bid}, {"$set": upd})
+    if upd.get("guest_phone"):
+        from routes_customers import link_customer
+        await link_customer("bookings", bid, {"name": m["guest_name"], "phone": upd["guest_phone"], "email": m.get("guest_email"),
+                                              "types": ["guest"], "source": m.get("platform"), "branch_id": b.get("branch_id")}, user)
+    await audit(user, "booking_updated", "shortstay", bid, {k: v for k, v in upd.items() if k in body})
+    return {**b, **upd}
 
 
 @router.patch("/bookings/{bid}/status")
 async def booking_status(bid: str, body: dict, user=Depends(require("shortstay", "w"))):
     st = body.get("status")
-    flow = {"confirmed": ["checked_in", "no_show"], "checked_in": ["completed"]}
-    b = await db.bookings.find_one({"id": bid}, {"_id": 0})
-    if not b:
-        raise HTTPException(404, "Booking not found")
+    flow = {"requested": ["confirmed", "declined"], "conflict": ["confirmed"], "confirmed": ["checked_in", "no_show"],
+            "checked_in": ["completed"]}
+    b = await _booking_for(user, bid)
     if st not in flow.get(b["status"], []):
         raise HTTPException(422, f"Cannot move from {b['status']} to {st}")
-    await db.bookings.update_one({"id": bid}, {"$set": {"status": st, f"{st}_at": now_iso()}})
+    if st == "confirmed":
+        blk = await blocked_by(b["property_id"], b["check_in"], b["check_out"])
+        if blk:
+            raise HTTPException(409, f"Dates are blocked from {blk['start']} to {blk['end']}")
+        await reserve_nights(b)
+        prop = await db.properties.find_one({"id": b["property_id"]}, {"_id": 0})
+        await _cleaning_task(b, prop, user)
+    r = await db.bookings.update_one({"id": bid, "status": b["status"]}, {"$set": {"status": st, f"{st}_at": now_iso()}})
+    if not r.modified_count:
+        if st == "confirmed":
+            await release_nights(bid)
+        raise HTTPException(409, "The booking changed meanwhile. Refresh and try again.")
+    if st == "declined" and body.get("reason"):
+        await db.bookings.update_one({"id": bid}, {"$set": {"cancel_reason": str(body["reason"])[:300]}})
+    await audit(user, "booking_status", "shortstay", bid, {"from": b["status"], "to": st})
     return {"ok": True}
 
 
@@ -524,15 +666,14 @@ async def booking_status(bid: str, body: dict, user=Depends(require("shortstay",
 async def booking_issue(bid: str, body: dict, user=Depends(require("shortstay", "w"))):
     if not body.get("note"):
         raise HTTPException(422, "Note is required")
-    r = await db.bookings.update_one({"id": bid}, {"$push": {"issues": {"at": now_iso(), "by": user["name"],
-                                                                        "note": str(body["note"])[:1000]}}})
-    if not r.matched_count:
-        raise HTTPException(404, "Booking not found")
+    await _booking_for(user, bid)
+    await db.bookings.update_one({"id": bid}, {"$push": {"issues": {"at": now_iso(), "by": user["name"],
+                                                                    "note": str(body["note"])[:1000]}}})
     return {"ok": True}
 
 
 async def apply_booking_cancel(b, payload, user):
-    r = await db.bookings.update_one({"id": b["id"], "status": {"$in": ["confirmed"]}, "settled": False},
+    r = await db.bookings.update_one({"id": b["id"], "status": {"$in": ["confirmed", "conflict", "requested"]}, "settled": False},
                                      {"$set": {"status": "cancelled", "cancel_reason": payload["reason"],
                                                "refund_amount": payload["refund_amount"], "cancelled_at": now_iso()}})
     if not r.modified_count:
@@ -544,9 +685,7 @@ async def apply_booking_cancel(b, payload, user):
 
 @router.post("/bookings/{bid}/cancel")
 async def cancel_booking(bid: str, body: CancelBookingIn, user=Depends(require("shortstay", "w"))):
-    b = await db.bookings.find_one({"id": bid}, {"_id": 0})
-    if not b:
-        raise HTTPException(404, "Booking not found")
+    b = await _booking_for(user, bid)
     if body.refund_amount > b["gross"]:
         raise HTTPException(422, "Refund exceeds booking value")
     settings = await get_settings()
@@ -564,23 +703,23 @@ async def cancel_booking(bid: str, body: CancelBookingIn, user=Depends(require("
 
 @router.post("/bookings/{bid}/settle")
 async def settle_booking(bid: str, user=Depends(require("shortstay", "w"))):
-    b = await db.bookings.find_one({"id": bid}, {"_id": 0})
-    if not b:
-        raise HTTPException(404, "Booking not found")
+    b = await _booking_for(user, bid)
     if b["status"] != "completed":
         raise HTTPException(422, "Only completed stays can be settled")
+    if b.get("amounts_estimated"):
+        raise HTTPException(422, "Enter the actual booking amounts from the platform before settling")
     r = await db.bookings.update_one({"id": bid, "settled": False}, {"$set": {"settled": True, "settled_at": now_iso(),
                                                                              "payout_status": "pending_manual_transfer"}})
     if not r.modified_count:
         raise HTTPException(409, "Booking already settled")
-    o = b.get("owner_id")
+    o, br = b.get("owner_id"), b.get("branch_id")
     await post_ledger("shortstay_owner", "in", b["net_after_platform"], "booking", bid,
-                      f"{b['code']} net booking proceeds (gross {inr(b['gross'])} less platform fee)", user, o, "booking_net")
+                      f"{b['code']} net booking proceeds (gross {inr(b['gross'])} less platform fee)", user, o, "booking_net", br)
     await post_ledger("shortstay_owner", "out", b["management_fee"], "booking", bid, f"{b['code']} management fee",
-                      user, o, "mgmt_fee")
+                      user, o, "mgmt_fee", br)
     await post_ledger("company", "in", b["management_fee"], "booking", bid, f"{b['code']} short-stay management fee",
-                      user, o, "revenue:shortstay")
+                      user, o, "revenue:shortstay", br)
     await post_ledger("shortstay_owner", "out", b["operating_costs"], "booking", bid, f"{b['code']} operating costs",
-                      user, o, "operating_costs")
+                      user, o, "operating_costs", br)
     await audit(user, "booking_settled", "shortstay", bid, {"owner_payout": b["owner_payout"]})
     return {"ok": True, "owner_payout": b["owner_payout"], "management_fee": b["management_fee"]}

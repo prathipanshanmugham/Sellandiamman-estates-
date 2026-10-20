@@ -50,9 +50,10 @@ class TestPublicExtras:
         t = requests.get(f"{API}/robots.txt").text
         assert "Allow: /s/" in t and "Disallow: /erp" in t and "Disallow: /owner" in t
 
-    def test_sitemap_lists_tools_insights_and_listings(self):
+    def test_sitemap_lists_places_insights_and_listings(self):
         x = requests.get(f"{API}/sitemap.xml").text
-        assert "/tools" in x and "/insights/" in x and "/properties/SEL-" in x
+        # the property tools are for staff only now, so they are not in the sitemap
+        assert "/tools" not in x and "/insights/" in x and "/properties/SEL-" in x and "/properties-in/" in x
 
 
 class TestLogoReset:

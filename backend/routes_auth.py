@@ -56,7 +56,13 @@ class UserIn(BaseModel):
     phone: Optional[str] = None
     branch_ids: List[str] = []
     owner_id: Optional[str] = None
+    investor_id: Optional[str] = None
     password: Optional[str] = Field(None, min_length=8, max_length=200)
+    designation: Optional[str] = Field(None, max_length=80)
+    department: Optional[str] = Field(None, max_length=60)
+    reports_to: Optional[str] = None
+    whatsapp: Optional[str] = Field(None, max_length=20)
+    joined_on: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 
 class UserPatch(BaseModel):
@@ -65,6 +71,35 @@ class UserPatch(BaseModel):
     phone: Optional[str] = None
     branch_ids: Optional[List[str]] = None
     active: Optional[bool] = None
+    designation: Optional[str] = Field(None, max_length=80)
+    department: Optional[str] = Field(None, max_length=60)
+    reports_to: Optional[str] = None
+    whatsapp: Optional[str] = Field(None, max_length=20)
+    show_in_directory: Optional[bool] = None
+    joined_on: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+async def _check_branches(ids):
+    ids = [i for i in (ids or []) if i]
+    if ids and await db.branches.count_documents({"id": {"$in": ids}}) != len(set(ids)):
+        raise HTTPException(422, "Unknown branch")
+    return list(dict.fromkeys(ids))
+
+
+async def _check_manager(uid, reports_to):
+    """reports_to must be another active staff member, and must not make a loop."""
+    if not reports_to:
+        return None
+    seen, cur = {uid}, reports_to
+    while cur:
+        if cur in seen:
+            raise HTTPException(422, "That reporting line would make a loop")
+        seen.add(cur)
+        m = await db.users.find_one({"id": cur}, {"_id": 0, "reports_to": 1, "role": 1})
+        if not m or m["role"] in ("owner", "investor"):
+            raise HTTPException(422, "Choose a staff member as the manager")
+        cur = m.get("reports_to")
+    return reports_to
 
 
 def _cookie(response: Response, token: str):
@@ -302,13 +337,14 @@ async def roles(user=Depends(staff_user)):
 
 @router.get("/users/lite")
 async def users_lite(user=Depends(staff_user)):
-    return await db.users.find({"active": True, "role": {"$ne": "owner"}}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(500)
+    return await db.users.find({"active": True, "role": {"$nin": ["owner", "investor"]}},
+                               {"_id": 0, "id": 1, "name": 1, "role": 1, "branch_ids": 1, "designation": 1}).to_list(500)
 
 
 @router.get("/users")
 async def list_users(user=Depends(require("users", "r"))):
     return await db.users.find({}, {"_id": 0, "password_hash": 0, "mfa_secret": 0, "mfa_pending_secret": 0,
-                                    "mfa_recovery": 0}).sort("created_at", 1).to_list(500)
+                                    "mfa_recovery": 0, "photo": 0}).sort("created_at", 1).to_list(500)
 
 
 def _check_grant(actor, role):
@@ -327,10 +363,20 @@ async def create_user(body: UserIn, user=Depends(require("users", "w"))):
     if body.role == "owner":
         if not body.owner_id or not await db.owners.find_one({"id": body.owner_id, "deleted": {"$ne": True}}):
             raise HTTPException(422, "Choose the owner record this portal account belongs to")
-    doc = {"id": new_id(), "email": email, "name": body.name.strip(), "role": body.role, "phone": body.phone,
-           "branch_ids": body.branch_ids, "active": bool(body.password), "created_at": now_iso(),
-           "owner_id": body.owner_id if body.role == "owner" else None,
+    if body.role == "investor":
+        if not body.investor_id or not await db.investors.find_one({"id": body.investor_id, "deleted": {"$ne": True}}):
+            raise HTTPException(422, "Choose the investor record this portal account belongs to")
+    portal = body.role in ("owner", "investor")
+    uid = new_id()
+    doc = {"id": uid, "email": email, "name": body.name.strip(), "role": body.role, "phone": body.phone,
+           "branch_ids": [] if portal else await _check_branches(body.branch_ids), "active": bool(body.password),
+           "created_at": now_iso(), "owner_id": body.owner_id if body.role == "owner" else None,
+           "investor_id": body.investor_id if body.role == "investor" else None,
            "password_hash": hash_password(body.password) if body.password else None}
+    if not portal:
+        doc.update({"designation": body.designation, "department": body.department, "whatsapp": body.whatsapp,
+                    "joined_on": body.joined_on, "reports_to": await _check_manager(uid, body.reports_to),
+                    "show_in_directory": True})
     await db.users.insert_one(dict(doc))
     link, status = (None, None) if body.password else await _issue_token(doc, "activation")
     await audit(user, "user_created", "users", doc["id"], {"role": body.role})
@@ -342,11 +388,17 @@ async def update_user(uid: str, body: UserPatch, user=Depends(require("users", "
     target = await db.users.find_one({"id": uid}, {"_id": 0})
     if not target:
         raise HTTPException(404, "User not found")
-    upd = body.model_dump(exclude_none=True)
+    upd = body.model_dump(exclude_unset=True)
+    upd = {k: v for k, v in upd.items() if v is not None or k in ("reports_to", "designation", "department", "whatsapp")}
     if "role" in upd:
         _check_grant(user, upd["role"])
-        if (upd["role"] == "owner") != (target["role"] == "owner"):
-            raise HTTPException(422, "Owner portal accounts and staff accounts cannot be converted into each other")
+        portal = ("owner", "investor")
+        if (upd["role"] in portal or target["role"] in portal) and upd["role"] != target["role"]:
+            raise HTTPException(422, "Portal accounts and staff accounts cannot be converted into each other")
+    if "branch_ids" in upd:
+        upd["branch_ids"] = await _check_branches(upd["branch_ids"])
+    if "reports_to" in upd:
+        upd["reports_to"] = await _check_manager(uid, upd["reports_to"])
     if target["role"] == "super_admin" and user["role"] != "super_admin":
         raise HTTPException(403, "Cannot modify a Super Administrator")
     if uid == user["id"] and (upd.get("active") is False or ("role" in upd and upd["role"] != user["role"])):

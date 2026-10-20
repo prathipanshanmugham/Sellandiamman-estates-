@@ -17,15 +17,24 @@ import routes_ops
 import routes_admin
 import routes_content
 import routes_portal
+import routes_branches
+import routes_customers
+import routes_channels
+import routes_investors
+import routes_agreements
+import routes_cms
+import routes_ceo
+import routes_seo
 from seed import seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-APP_VERSION = "2026.10.2"
+APP_VERSION = "2026.10.3"
 app = FastAPI(title="Sellandiamman Estates API", version=APP_VERSION, docs_url="/api/docs",
               openapi_url="/api/openapi.json")
 
 for r in (routes_auth, routes_public, routes_crm, routes_props, routes_deals, routes_finance, routes_ops, routes_admin,
-          routes_content, routes_portal):
+          routes_content, routes_portal, routes_branches, routes_customers, routes_channels, routes_investors, routes_agreements,
+          routes_cms, routes_ceo, routes_seo):
     app.include_router(r.router, prefix="/api")
 
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", SITE_URL).split(",") if o.strip()]
@@ -47,7 +56,7 @@ async def security(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "SAMEORIGIN"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(self)"
     if request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https":
         resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/public"):
@@ -69,11 +78,21 @@ async def _automation_loop():
             logger.exception("Automation run failed")
 
 
+async def _frequent_loop():
+    while True:
+        await asyncio.sleep(900)
+        try:
+            await routes_admin.run_frequent()
+        except Exception:
+            logger.exception("Calendar sync / scheduled posts run failed")
+
+
 @app.on_event("startup")
 async def startup():
     await seed()
     if os.environ.get("DISABLE_AUTOMATIONS") != "true":
         asyncio.create_task(_automation_loop())
+        asyncio.create_task(_frequent_loop())
 
 
 @app.get("/api/health")

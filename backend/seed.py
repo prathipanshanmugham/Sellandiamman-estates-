@@ -43,6 +43,23 @@ async def ensure_indexes():
     await db.site_visits.create_index([("status", 1), ("scheduled_at", 1)])
     await db.posts.create_index("slug")
     await db.posts.create_index([("status", 1), ("published_at", -1)])
+    for c in ("branches", "customers", "locations", "stay_channels", "stay_blocks", "investors", "inv_projects", "investments",
+              "distributions", "agreements", "site_versions"):
+        await db[c].create_index("id", unique=True)
+    await db.customers.create_index("phone")
+    await db.customers.create_index([("branch_id", 1), ("created_at", -1)])
+    await db.locations.create_index([("kind", 1), ("city", 1), ("name", 1)])
+    await db.stay_channels.create_index("export_token", unique=True)
+    await db.stay_channels.create_index("property_id")
+    await db.stay_blocks.create_index([("property_id", 1), ("start", 1)])
+    await db.bookings.create_index([("channel_id", 1), ("channel_uid", 1)])
+    await db.investments.create_index([("investor_id", 1), ("project_id", 1)])
+    await db.distributions.create_index([("investor_id", 1), ("date", -1)])
+    await db.agreements.create_index([("entity_type", 1), ("entity_id", 1)])
+    await db.site_content.create_index("id", unique=True)
+    await db.migrations.create_index("id", unique=True)
+    for c in ("leads", "properties", "leases", "bookings", "invoices", "ledger_entries", "expenses", "deals", "work_orders"):
+        await db[c].create_index("branch_id")
 
 
 async def seed_core():
@@ -63,25 +80,138 @@ async def seed_core():
             await db.users.update_one({"email": email}, {"$set": {"password_hash": hash_password(pw), "active": True}})
             await db.sessions.update_many({"user_id": u["id"]}, {"$set": {"revoked": True}})
             logger.warning("Admin password reset from environment for %s", email)
-    for b in ({"id": "br-erode", "name": "Erode", "city": "Erode"},
-              {"id": "br-perundurai", "name": "Perundurai", "city": "Perundurai"}):
-        await db.branches.update_one({"id": b["id"]}, {"$setOnInsert": b}, upsert=True)
+    await seed_branches()
     await db.settings.update_one({"id": "company"}, {"$setOnInsert": {
         "id": "company", "name": "Sellandiamman Estates", "legal_name": "Sellandiamman Estates (Sellandiamman Group)",
         "phone": "+91 00000 00000", "whatsapp": "", "email": "info@example.com",
-        "address": "[Office address], Erode, Tamil Nadu", "gstin": "", "gst_enabled": False, "gst_rate": 0,
-        "rera_no": "", "social": {}, "cities": ["Erode", "Perundurai"], "localities": [], "invoice_due_days": 15,
+        "address": "[Head office address], Perundurai, Tamil Nadu", "gstin": "", "gst_enabled": False, "gst_rate": 0,
+        "rera_no": "", "social": {}, "cities": [b["city"] for b in BRANCHES], "localities": [], "invoice_due_days": 15,
         "approvals": {"commission_change": True, "refunds": True, "write_offs": True},
         "demo_mode": os.environ.get("SEED_DEMO") == "true", "office_hours": "Mon–Sat, 9:30 AM – 6:30 PM",
         "hero_title": "Property services for Erode & Perundurai",
         "hero_subtitle": "Buy, sell, rent, lease and professionally managed homes, land and industrial spaces.",
         "announcement": "", "testimonials": [], "mfa_required_roles": [], "email_notifications": False,
-        "map_center": {"lat": 11.31, "lng": 77.65, "zoom": 11}}}, upsert=True)
+        "map_center": {"lat": 11.36, "lng": 77.68, "zoom": 9}, "agreement_signatory": "", "targets": {}}}, upsert=True)
     # settings added after the first release
     await db.settings.update_one({"id": "company", "map_center": {"$exists": False}},
                                  {"$set": {"map_center": {"lat": 11.31, "lng": 77.65, "zoom": 11}, "social": {},
                                            "rera_no": "", "announcement": "", "mfa_required_roles": [],
                                            "email_notifications": False}})
+
+
+# The five branches. Perundurai is the head office. Addresses and phone numbers are placeholders for the team to fill in
+# (Settings → Branches); map points are town centres and can be moved to the exact office.
+BRANCHES = [
+    {"id": "br-perundurai", "code": "PDR", "name": "Perundurai", "city": "Perundurai", "district": "Erode", "pincode": "638052",
+     "lat": 11.2750, "lng": 77.5874, "is_head_office": True, "order": 1},
+    {"id": "br-erode", "code": "ERD", "name": "Erode", "city": "Erode", "district": "Erode", "pincode": "638001",
+     "lat": 11.3410, "lng": 77.7172, "is_head_office": False, "order": 2},
+    {"id": "br-kadambur", "code": "KDB", "name": "Kadambur", "city": "Kadambur", "district": "Erode", "pincode": None,
+     "lat": None, "lng": None, "is_head_office": False, "order": 3},
+    {"id": "br-sathyamangalam", "code": "STY", "name": "Sathyamangalam", "city": "Sathyamangalam", "district": "Erode",
+     "pincode": "638401", "lat": 11.5048, "lng": 77.2384, "is_head_office": False, "order": 4},
+    {"id": "br-namakkal", "code": "NMK", "name": "Namakkal", "city": "Namakkal", "district": "Namakkal", "pincode": "637001",
+     "lat": 11.2189, "lng": 78.1677, "is_head_office": False, "order": 5},
+]
+CITY_BRANCH = {b["city"]: b["id"] for b in BRANCHES}
+
+
+async def seed_branches():
+    for b in BRANCHES:
+        doc = {**b, "address": f"[Office address], {b['city']}, Tamil Nadu", "phone": None, "whatsapp": None, "email": None,
+               "office_hours": None, "manager_id": None, "active": True, "gbp_url": None, "created_at": now_iso()}
+        await db.branches.update_one({"id": b["id"]}, {"$setOnInsert": doc}, upsert=True)
+        # branches made by the first release only had a name and town
+        await db.branches.update_one({"id": b["id"], "code": {"$exists": False}},
+                                     {"$set": {k: v for k, v in doc.items() if k not in ("id", "name", "city", "created_at", "is_head_office")}})
+    if not await db.branches.find_one({"is_head_office": True}):
+        await db.branches.update_one({"id": "br-perundurai"}, {"$set": {"is_head_office": True}})
+
+
+async def _once(key, fn):
+    if await db.migrations.find_one({"id": key}):
+        return
+    res = await fn()
+    await db.migrations.insert_one({"id": key, "at": now_iso(), "result": str(res)[:300]})
+    logger.info("Migration %s done: %s", key, res)
+
+
+async def _locations():
+    """Town and locality list (used for search, location pages and branch routing) from the branches and every property."""
+    from routes_branches import ensure_place
+    from core import branch_for_place
+    import re as _re
+    for b in await db.branches.find({}, {"_id": 0}).to_list(100):
+        c = await ensure_place(b["city"], branch_id=b["id"])
+        if c and not c.get("branch_id"):
+            await db.locations.update_one({"id": c["id"]}, {"$set": {"branch_id": b["id"], "district": b.get("district")}})
+        if b.get("lat") and c and not c.get("lat"):
+            await db.locations.update_one({"id": c["id"]}, {"$set": {"lat": b["lat"], "lng": b["lng"], "pincode": b.get("pincode")}})
+    n = 0
+    for p in await db.properties.find({"deleted": {"$ne": True}}, {"_id": 0, "city": 1, "locality": 1, "pincode": 1, "branch_id": 1}).to_list(50000):
+        if p.get("city"):
+            await ensure_place(p["city"], p.get("locality"), p.get("pincode"), branch_id=p.get("branch_id") or await branch_for_place(p["city"]))
+            n += 1
+    s = await db.settings.find_one({"id": "company"}, {"_id": 0, "localities": 1}) or {}
+    for loc in s.get("localities") or []:
+        if isinstance(loc, dict) and loc.get("city") and loc.get("name"):
+            await ensure_place(loc["city"], loc["name"], branch_id=await branch_for_place(loc["city"]))
+    return {"from_properties": n, "places": await db.locations.count_documents({})}
+
+
+async def _branch_ids():
+    """Records made before branches existed get the branch of their property (or the head office)."""
+    from core import head_office_id, branch_for_place
+    from routes_crm import branch_from_text
+    ho = await head_office_id()
+    missing = {"$or": [{"branch_id": {"$exists": False}}, {"branch_id": None}]}
+    n = 0
+    for p in await db.properties.find(missing, {"_id": 0, "id": 1, "city": 1, "locality": 1}).to_list(50000):
+        await db.properties.update_one({"id": p["id"]}, {"$set": {"branch_id": await branch_for_place(p.get("city"), p.get("locality"))}})
+        n += 1
+    pb = {p["id"]: p.get("branch_id") for p in await db.properties.find({}, {"_id": 0, "id": 1, "branch_id": 1}).to_list(50000)}
+    for coll in ("leases", "bookings", "work_orders", "site_visits", "deals", "stay_channels"):
+        for r in await db[coll].find(missing, {"_id": 0, "id": 1, "property_id": 1}).to_list(50000):
+            await db[coll].update_one({"id": r["id"]}, {"$set": {"branch_id": pb.get(r.get("property_id")) or ho}})
+            n += 1
+    for ld in await db.leads.find(missing, {"_id": 0, "id": 1, "property_id": 1, "preferred_locations": 1}).to_list(50000):
+        await db.leads.update_one({"id": ld["id"]}, {"$set": {"branch_id": pb.get(ld.get("property_id")) or await branch_from_text(ld.get("preferred_locations"))}})
+        n += 1
+    db_ = {d["id"]: d.get("branch_id") for d in await db.deals.find({}, {"_id": 0, "id": 1, "branch_id": 1}).to_list(50000)}
+    for i in await db.invoices.find(missing, {"_id": 0, "id": 1, "deal_id": 1}).to_list(50000):
+        await db.invoices.update_one({"id": i["id"]}, {"$set": {"branch_id": db_.get(i.get("deal_id")) or ho}})
+        n += 1
+    await db.expenses.update_many(missing, {"$set": {"branch_id": ho}})
+    # ledger lines follow the record they came from
+    ref = {}
+    for coll in ("invoices", "leases", "bookings", "work_orders", "deals", "expenses"):
+        for r in await db[coll].find({}, {"_id": 0, "id": 1, "branch_id": 1}).to_list(100000):
+            ref[r["id"]] = r.get("branch_id")
+    for r in await db.payments.find({}, {"_id": 0, "id": 1, "invoice_id": 1}).to_list(100000):
+        ref[r["id"]] = ref.get(r.get("invoice_id"))
+    for coll in ("rent_payments", "deposit_movements"):
+        for r in await db[coll].find({}, {"_id": 0, "id": 1, "lease_id": 1}).to_list(100000):
+            ref[r["id"]] = ref.get(r.get("lease_id"))
+    for e in await db.ledger_entries.find(missing, {"_id": 0, "id": 1, "ref_id": 1}).to_list(200000):
+        await db.ledger_entries.update_one({"id": e["id"]}, {"$set": {"branch_id": ref.get(e.get("ref_id")) or ho}})
+        n += 1
+    return {"updated": n}
+
+
+async def _settings_r3():
+    await db.settings.update_one({"id": "company", "map_center.zoom": 11}, {"$set": {"map_center": {"lat": 11.36, "lng": 77.68, "zoom": 9}}})
+    await db.settings.update_one({"id": "company", "cities": ["Erode", "Perundurai"]}, {"$set": {"cities": [b["city"] for b in BRANCHES]}})
+    return "ok"
+
+
+async def migrate():
+    from routes_customers import backfill_customers
+    from routes_cms import seed_site
+    await _once("r3_settings", _settings_r3)
+    await _once("r3_locations", _locations)
+    await _once("r3_branch_ids", _branch_ids)
+    await _once("r3_customers", backfill_customers)
+    await seed_site()
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -90,6 +220,27 @@ async def seed_core():
 DEMO_USERS = [("director", "Karthik Raman"), ("branch_manager", "Priya Sundaram"), ("sales_agent", "Vignesh Kumar"),
               ("property_manager", "Deepa Natarajan"), ("accountant", "Senthil Murugan"), ("marketing", "Divya Prakash"),
               ("shortstay_ops", "Arun Balaji"), ("auditor", "Lakshmi Iyer")]
+# role -> (designation, department, branches ([] = all), reports to (role or extra key))
+DEMO_PROFILE = {
+    "director": ("Managing Director", "Management", [], None),
+    "branch_manager": ("Branch Manager – Erode", "Branches", ["br-erode"], "director"),
+    "sales_agent": ("Sales Executive", "Sales", ["br-erode"], "branch_manager"),
+    "property_manager": ("Property Manager", "Property management", ["br-erode"], "branch_manager"),
+    "accountant": ("Accounts Manager", "Finance", [], "director"),
+    "marketing": ("Marketing Lead", "Marketing", [], "director"),
+    "shortstay_ops": ("Short-Stay Operations Lead", "Short stays", [], "director"),
+    "auditor": ("Internal Auditor", "Finance", [], "director"),
+}
+# key, role, name, email, designation, department, branch, reports to
+EXTRA_STAFF = [
+    ("bm_pdr", "branch_manager", "Ganesh Palanisamy", "perundurai.manager", "Branch Manager – Perundurai (Head Office)", "Branches",
+     "br-perundurai", "director"),
+    ("agent_pdr", "sales_agent", "Dinesh Kumar", "perundurai.sales", "Sales Executive – Industrial & SIPCOT", "Sales", "br-perundurai", "bm_pdr"),
+    ("bm_sty", "branch_manager", "Revathi Kumar", "sathy.manager", "Branch Manager – Sathyamangalam", "Branches", "br-sathyamangalam", "director"),
+    ("bm_kdb", "branch_manager", "Muthusamy K", "kadambur.manager", "Branch In-charge – Kadambur", "Branches", "br-kadambur", "bm_sty"),
+    ("bm_nmk", "branch_manager", "Saravanan Muthu", "namakkal.manager", "Branch Manager – Namakkal", "Branches", "br-namakkal", "director"),
+    ("agent_nmk", "sales_agent", "Keerthi Vasan", "namakkal.sales", "Sales Executive", "Sales", "br-namakkal", "bm_nmk"),
+]
 
 
 def demo_email(role):
@@ -200,12 +351,49 @@ PROPS = [
      "total", ["/images/estate.jpg"],
      dict(bedrooms=4, bathrooms=4, built_area=2600, plot_area=2400, status="draft",
           description_public="")),
+    # branches added in 2026 (map points are approximate)
+    ("Riverside Farm Stay – 3 Bedrooms", "residential", "short_stay", "Sathyamangalam", "Bhavanisagar Road", "638401", 11.5101,
+     77.2602, 5500, "per_night", ["/images/estate.jpg", "/images/contemporary.jpg", "/images/interior.jpg"],
+     dict(bedrooms=3, bathrooms=3, max_guests=8, nightly_rate=5500, mgmt_fee_pct=20, furnishing="furnished",
+          service_type="short_stay", featured=True, amenities=["Wi-Fi", "Kitchen", "Garden", "Car parking", "Bonfire area"],
+          checkin_instructions="The caretaker meets you at the gate; call 30 minutes before you arrive.",
+          description_public="A three-bedroom farm stay among coconut trees on the Bhavanisagar road, for families and groups "
+                             "of up to eight. Full kitchen, garden, bonfire area and parking. A good base for the Bhavanisagar "
+                             "dam and the Sathyamangalam hills.")),
+    ("Farmland with Coconut Grove – 4 Acres", "agricultural", "sale", "Kadambur", "Kadambur", None, None, None, 6400000, "total",
+     ["/images/land2.jpg"],
+     dict(plot_area=4, area_unit="acres", amenities=["Borewell", "Coconut trees", "EB connection", "Road access"],
+          description_public="Four acres of farmland with a coconut grove, a borewell with EB connection and road access. "
+                             "Patta in the owner's name; documents available for review.")),
+    ("2 BHK House near Namakkal Bus Stand", "residential", "sale", "Namakkal", "Mohanur Road", "637001", 11.2150, 78.1690,
+     4200000, "total", ["/images/house.jpg"],
+     dict(bedrooms=2, bathrooms=2, built_area=1100, plot_area=1500, furnishing="unfurnished",
+          amenities=["Car parking", "Corporation water", "East facing"],
+          description_public="Independent 2 BHK house on a 1,500 sq.ft plot off Mohanur Road, ten minutes from the Namakkal "
+                             "bus stand. East facing, with car parking and corporation water.")),
+    ("Shop on Paramathi Road", "shop", "rent", "Namakkal", "Paramathi Road", "637001", 11.2230, 78.1580, 28000, "per_month",
+     ["/images/commercial.jpg"],
+     dict(built_area=600, amenities=["Main road frontage", "Rolling shutter", "Washroom"],
+          description_public="600 sq.ft ground-floor shop with main-road frontage on Paramathi Road. Suits a pharmacy, mobile "
+                             "store or showroom.")),
+    ("Residential Plot – Mettupalayam Road", "land", "sale", "Sathyamangalam", "Mettupalayam Road", "638401", 11.4950, 77.2300,
+     1250000, "total", ["/images/land.jpg"],
+     dict(plot_area=2000, amenities=["DTCP approved", "Tar road", "Street lights"],
+          description_public="2,000 sq.ft plot in a DTCP-approved layout on the Sathyamangalam–Mettupalayam road, with tar "
+                             "roads and street lights.")),
+    ("2 BHK House for Rent – Perundurai", "residential", "rent", "Perundurai", "Perundurai Town", "638052", 11.2760, 77.5880,
+     11000, "per_month", ["/images/house.jpg", "/images/interior.jpg"],
+     dict(bedrooms=2, bathrooms=1, built_area=900, furnishing="semi_furnished", service_type="management", mgmt_fee_pct=8,
+          amenities=["Two-wheeler parking", "Borewell", "Near schools"],
+          description_public="Semi-furnished 2 BHK on the first floor, walking distance from Perundurai bus stand and schools. "
+                             "Suits a family or staff of SIPCOT units.")),
 ]
 
 OWNERS = [("R. Shanmugam", False, "individual"), ("Meena Krishnan", False, "individual"),
           ("S. Ravichandran (Dubai)", True, "individual"), ("Kongu Textiles LLP", False, "company"),
-          ("Anitha Velusamy", False, "individual")]
-OWNER_OF = [0, 1, 0, 3, 3, 1, 2, 2, 0, 4, 4, 0, 1, 2, 4, 4]
+          ("Anitha Velusamy", False, "individual"), ("P. Sengottaiyan", False, "individual"),
+          ("Lakshmi Agencies", False, "company")]
+OWNER_OF = [0, 1, 0, 3, 3, 1, 2, 2, 0, 4, 4, 0, 1, 2, 4, 4, 5, 5, 6, 6, 5, 0]
 LEADS = [  # name, source, stage, interest, budget_min, budget_max, locations, requirements, days_ago, followup_days
     ("Ravi Chandran", "website", "new", "buy", 5000000, 9000000, "Thindal, Nasiyanur", "3 BHK villa, east facing", 1, None),
     ("Priya Mohan", "whatsapp", "contacted", "rent", 12000, 18000, "Perundurai Road", "2 BHK furnished near schools", 6, -1),
@@ -221,7 +409,13 @@ LEADS = [  # name, source, stage, interest, budget_min, budget_max, locations, r
     ("Janani Venkatesh", "website", "qualified", "buy", 5000000, 7000000, "Periyar Nagar, Surampatti", "3 BHK apartment near bus stand", 7, 1),
     ("Sri Murugan Traders", "phone", "won", "rent", 50000, 70000, "Brough Road", "Showroom on main road", 55, None),
     ("Kavitha Arun", "referral", "won", "rent", 30000, 40000, "Surampatti", "Office space", 70, None),
+    ("Manikandan S", "website", "qualified", "buy", 3500000, 4500000, "Namakkal, Mohanur Road", "2 BHK house near the bus stand", 5, 1),
+    ("Deepika Ramesh", "whatsapp", "new", "short_stay", None, None, "Sathyamangalam", "Weekend farm stay for 8 people", 1, None),
+    ("Velan Agro Foods", "phone", "contacted", "buy", 2000000, 7000000, "Kadambur", "Farmland with a water source", 3, 2),
+    ("Prakash Medicals", "walk_in", "won", "rent", 25000, 30000, "Namakkal, Paramathi Road", "Shop on the main road", 35, None),
 ]
+LEAD_BRANCH = {"Perundurai": "br-perundurai", "SIPCOT": "br-perundurai", "Vijayamangalam": "br-perundurai",
+               "Namakkal": "br-namakkal", "Sathyamangalam": "br-sathyamangalam", "Kadambur": "br-kadambur"}
 
 POSTS = [
     ("Erode property market: what changed in 2026", "market_update", 18,
@@ -242,7 +436,7 @@ POSTS = [
      "- **Approval** – DTCP or local-body approved layout and building plan\n- **Property tax and EB receipts** up to date\n\n"
      "## On the site\n\nWalk the boundaries with the survey sketch. Check road width, water source and drainage. Ask "
      "neighbours about any disputes.\n\n## Costs to budget\n\nAdd stamp duty, registration fees, legal fees and our "
-     "brokerage to the price. Use our [calculators](/tools) to estimate them."),
+     "brokerage to the price. Our team can give you an estimate of these costs before you commit."),
     ("Renting out your home: how property management works", "owner_guide", 52,
      "From finding a tenant to monthly statements, here is what our management service covers for owners.",
      "## What we take care of\n\nWe advertise the property, screen tenants, arrange the rental agreement and handover, "
@@ -270,19 +464,39 @@ async def seed_demo():
     import routes_finance as fin
     import routes_ops as ops
     import routes_content as content
+    import routes_channels as chan
+    import routes_investors as invr
+    import routes_agreements as agr
+    from routes_branches import ensure_place
     rnd = random.Random(7)
     pw = os.environ["DEMO_PASSWORD"]
     t = today_ist()
     users = {}
-    for role, name in DEMO_USERS:
-        u = {"id": new_id(), "email": demo_email(role), "name": name, "role": role, "active": True,
-             "branch_ids": ["br-erode"], "password_hash": hash_password(pw), "created_at": _iso(t - timedelta(days=120)),
-             "phone": f"+9190000010{len(users):02d}"}
+    staff = [(role, role, name, demo_email(role), *DEMO_PROFILE[role][:2], DEMO_PROFILE[role][2], DEMO_PROFILE[role][3])
+             for role, name in DEMO_USERS]
+    staff += [(k, role, name, f"{mail}@{DEMO_DOMAIN}", des, dept, [br], rep) for k, role, name, mail, des, dept, br, rep in EXTRA_STAFF]
+    for k, role, name, email, des, dept, brs, _ in staff:
+        u = {"id": new_id(), "email": email, "name": name, "role": role, "active": True, "branch_ids": brs,
+             "password_hash": hash_password(pw), "created_at": _iso(t - timedelta(days=120)), "phone": f"+9190000010{len(users):02d}",
+             "whatsapp": f"+9190000010{len(users):02d}", "designation": des, "department": dept, "show_in_directory": True,
+             "joined_on": (t - timedelta(days=400 + 90 * len(users))).isoformat()}
         await db.users.update_one({"email": u["email"]}, {"$setOnInsert": u}, upsert=True)
-        users[role] = await db.users.find_one({"email": u["email"]}, {"_id": 0, "password_hash": 0})
+        users[k] = await db.users.find_one({"email": u["email"]}, {"_id": 0, "password_hash": 0})
+    for k, *_, rep in staff:
+        if rep:
+            await db.users.update_one({"id": users[k]["id"]}, {"$set": {"reports_to": users[rep]["id"]}})
     admin = await db.users.find_one({"role": "super_admin"}, {"_id": 0, "password_hash": 0}) or users["director"]
+    if admin["id"] != users["director"]["id"]:
+        await db.users.update_one({"id": admin["id"]}, {"$set": {"designation": "System administrator", "show_in_directory": False}})
     ag, pm, acc, bm, ss = (users[r] for r in ("sales_agent", "property_manager", "accountant", "branch_manager",
                                               "shortstay_ops"))
+    director = users["director"]
+    BM = {"br-erode": bm, "br-perundurai": users["bm_pdr"], "br-sathyamangalam": users["bm_sty"], "br-kadambur": users["bm_kdb"],
+          "br-namakkal": users["bm_nmk"]}
+    AGENT = {"br-erode": ag, "br-perundurai": users["agent_pdr"], "br-namakkal": users["agent_nmk"],
+             "br-sathyamangalam": users["bm_sty"], "br-kadambur": users["bm_kdb"]}
+    for bid, m in BM.items():
+        await db.branches.update_one({"id": bid}, {"$set": {"manager_id": m["id"]}})
     owners = []
     for i, (n, nri, kind) in enumerate(OWNERS):
         o = {"id": new_id(), "code": await next_code("owner", "SE-O-"), "name": n, "phone": f"+9190000000{i:02d}",
@@ -301,40 +515,46 @@ async def seed_demo():
         extra = dict(extra)
         status = extra.pop("status", "published")
         pub = status in ("published", "under_offer", "closed")
-        created = t - timedelta(days=140 - i * 6)
+        created = t - timedelta(days=140 - i * 6) if i < 16 else t - timedelta(days=70 - (i - 16) * 9)
+        br = CITY_BRANCH[city]
         p = {"id": new_id(), "code": await next_code("property", "SE-P-"), "title": title, "category": cat,
              "transaction": tx, "ownership_type": "third_party", "city": city, "locality": loc, "pincode": pin,
-             "public_lat": round(lat, 4), "public_lng": round(lng, 4), "price": price, "price_unit": unit,
+             "public_lat": round(lat, 3) if lat else None, "public_lng": round(lng, 3) if lng else None,
+             "geo": {"lat": lat, "lng": lng, "accuracy_m": 500, "source": "map_pin", "at": _iso(created)} if lat else None,
+             "location_public": "approximate", "price": price, "price_unit": unit,
              "price_on_request": False, "images": imgs, "amenities": extra.pop("amenities", []),
              "area_unit": extra.pop("area_unit", "sq.ft"), "availability": "Immediate", "occupancy": "vacant",
              "status": status, "service_type": extra.pop("service_type", "brokerage"),
              "source": extra.pop("source", "direct"), "owner_id": owners[OWNER_OF[i]]["id"],
-             "branch_id": "br-perundurai" if city == "Perundurai" else "br-erode",
-             "assigned_agent": ag["id"] if tx in ("sale", "rent", "lease") else None,
-             "assigned_manager": pm["id"] if tx in ("rent", "lease") else (ss["id"] if tx == "short_stay" else None),
-             "verification": {"status": "verified", "by": bm["name"], "at": _iso(created + timedelta(days=2))} if status not in (
+             "branch_id": br,
+             "assigned_agent": AGENT[br]["id"] if tx in ("sale", "rent", "lease") else None,
+             "assigned_manager": (pm if br == "br-erode" else BM[br])["id"] if tx in ("rent", "lease") else (ss["id"] if tx == "short_stay" else None),
+             "verification": {"status": "verified", "by": BM[br]["name"], "at": _iso(created + timedelta(days=2))} if status not in (
                  "verification_pending", "draft") else {"status": "pending" if status == "verification_pending" else "not_started"},
              "authorization": {"signed": True, "marketing_authorized": True,
                                "expiry": (t + timedelta(days=25 if i == 4 else 180)).isoformat()} if pub else {},
-             "publication_history": [{"at": _iso(created + timedelta(days=3)), "by": bm["name"], "action": "published"}] if pub else [],
+             "publication_history": [{"at": _iso(created + timedelta(days=3)), "by": BM[br]["name"], "action": "published"}] if pub else [],
              "featured": extra.pop("featured", False), "listing_id": await next_code("listing", "SEL-", 5) if pub else None,
              "published_at": _iso(created + timedelta(days=3)) if pub else None,
              "created_at": _iso(created), "updated_at": _iso(created + timedelta(days=3)), "deleted": False,
-             "created_by": bm["id"], **extra}
+             "created_by": BM[br]["id"], **extra}
         props.append(p)
         await db.properties.insert_one(dict(p))
+        await ensure_place(city, loc, pin, lat, lng, br, "seed")
 
     # ---------- leads, activities and visits ----------
     leads = []
     for i, (n, src, st, it, bmin, bmax, locs, req, ago, fu) in enumerate(LEADS):
         created = t - timedelta(days=ago)
         lid = new_id()
+        lbr = next((b for k, b in LEAD_BRANCH.items() if k in locs), "br-erode")
+        lag = AGENT[lbr]
         lead = {"id": lid, "code": await next_code("lead", "SE-LD-", 5), "name": n, "phone": f"+919000000{101 + i}",
                 "email": f"lead{i}@example.com" if i % 3 == 0 else None, "source": src, "stage": st, "interest": it,
                 "customer_type": "business" if any(w in n for w in ("Ltd", "Logistics", "Traders", "Weaves")) else (
                     "seller" if it == "sell" else "tenant" if it in ("rent", "lease") else "buyer"),
                 "budget_min": bmin, "budget_max": bmax, "preferred_locations": locs, "requirements": req,
-                "assigned_to": ag["id"] if st != "new" else None, "branch_id": "br-erode",
+                "assigned_to": lag["id"] if st != "new" else None, "branch_id": lbr,
                 "next_follow_up": _iso(t + timedelta(days=fu), 11)[:16] if fu is not None else None,
                 "lost_reason": "budget_mismatch" if st == "lost" else None, "preferred_contact": "whatsapp",
                 "consent": {"marketing": i % 2 == 0, "recorded_at": _iso(created)}, "contacts": [], "deleted": False,
@@ -349,16 +569,16 @@ async def seed_demo():
             acts += [("whatsapp", "Sent 3 matching listings.", 2), ("stage_change", f"Stage: contacted → {st}", 3)]
         for k, (kind, note, d) in enumerate(acts):
             await db.lead_activities.insert_one({"id": new_id(), "lead_id": lid, "kind": kind, "notes": note,
-                                                 "user_id": None if kind == "created" else ag["id"],
-                                                 "user_name": "System" if kind == "created" else ag["name"],
+                                                 "user_id": None if kind == "created" else lag["id"],
+                                                 "user_name": "System" if kind == "created" else lag["name"],
                                                  "created_at": _iso(created + timedelta(days=d), 10 + k)})
     L = leads
 
     async def visit(lead, prop, when, status, feedback=None, source=None):
         v = {"id": new_id(), "lead_id": lead["id"], "lead_name": lead["name"], "property_id": prop["id"],
              "property_title": prop["title"], "property_code": prop["code"], "scheduled_at": when, "status": status,
-             "feedback": feedback, "agent_id": ag["id"] if status != "requested" else prop.get("assigned_agent"),
-             "source": source, "created_at": _iso(t - timedelta(days=2)), "notes": None}
+             "feedback": feedback, "agent_id": AGENT[prop["branch_id"]]["id"] if status != "requested" else prop.get("assigned_agent"),
+             "source": source, "created_at": _iso(t - timedelta(days=2)), "notes": None, "branch_id": prop["branch_id"]}
         await db.site_visits.insert_one(dict(v))
     await visit(L[3], props[7], _iso(t - timedelta(days=5), 11)[:16], "completed", "Liked the garden; wants a price revision.")
     await visit(L[3], props[0], _iso(t + timedelta(days=1), 16)[:16], "scheduled")
@@ -366,20 +586,22 @@ async def seed_demo():
     await visit(L[11], props[9], _iso(t + timedelta(days=3), 10)[:16], "requested", source="website")
     await visit(L[0], props[0], _iso(t + timedelta(days=4), 17)[:16], "requested", source="website")
     await visit(L[5], props[10], _iso(t - timedelta(days=3), 15)[:16], "completed", "Needs 2 more cabins; considering.")
+    await visit(L[14], props[18], _iso(t + timedelta(days=2), 11)[:16], "scheduled")
 
     # ---------- deals ----------
     async def make_deal(lead, prop, kind, offer, com, signed=True, close=False, splits=None, days_ago=0):
+        a_, m_ = AGENT[prop["branch_id"]], BM[prop["branch_id"]]
         d = await deals.create_deal(deals.DealIn(title=f"{lead['name']} – {prop['title']}", deal_type=kind,
                                                  property_id=prop["id"], lead_id=lead["id"], buyer_name=lead["name"],
                                                  buyer_phone=lead["phone"], seller_name=next(
-                                                     o["name"] for o in owners if o["id"] == prop["owner_id"])), ag)
+                                                     o["name"] for o in owners if o["id"] == prop["owner_id"])), a_)
         if offer:
-            o = await deals.add_offer(d["id"], deals.OfferIn(amount=offer, party=lead["name"]), ag)
-            await deals.offer_status(d["id"], o["id"], {"status": "accepted"}, ag)
+            o = await deals.add_offer(d["id"], deals.OfferIn(amount=offer, party=lead["name"]), a_)
+            await deals.offer_status(d["id"], o["id"], {"status": "accepted"}, a_)
         if com:
-            await deals.set_commission(d["id"], deals.CommissionIn(**com, agreement_signed=signed, splits=splits or []), bm)
+            await deals.set_commission(d["id"], deals.CommissionIn(**com, agreement_signed=signed, splits=splits or []), m_)
         if close:
-            await deals.close_deal(d["id"], bm)
+            await deals.close_deal(d["id"], m_)
             when = _iso(t - timedelta(days=days_ago), 15)
             await db.deals.update_one({"id": d["id"]}, {"$set": {"closed_at": when, "created_at": _iso(t - timedelta(days=days_ago + 20))}})
         return d
@@ -389,6 +611,9 @@ async def seed_demo():
                          close=True, days_ago=40)
     d3 = await make_deal(L[12], props[5], "rent", 65000, {"type": "months_rent", "value": 1, "payer": "Sri Murugan Traders"},
                          close=True, days_ago=8)
+    d6 = await make_deal(L[17], props[19], "rent", 28000, {"type": "months_rent", "value": 1, "payer": "Prakash Medicals"},
+                         close=True, days_ago=30)
+    await db.properties.update_one({"id": props[19]["id"]}, {"$set": {"status": "closed", "closed_as": "rented", "occupancy": "occupied"}})
     d4 = await make_deal(L[3], props[7], "sale", 11800000, {"type": "percent", "value": 1.5, "payer": "S. Ravichandran (Dubai)"})
     await db.properties.update_one({"id": props[7]["id"]}, {"$set": {"status": "under_offer"}})
     d5 = await make_deal(L[6], props[4], "lease", None, None)
@@ -405,16 +630,19 @@ async def seed_demo():
     inv1 = await deals.deal_invoice(d1["id"], acc)
     inv2 = await deals.deal_invoice(d2["id"], acc)
     inv3 = await deals.deal_invoice(d3["id"], acc)
+    inv6 = await deals.deal_invoice(d6["id"], acc)
+    p6 = await fin.record_payment(inv6["id"], fin.PaymentIn(amount=inv6["total"], method="upi", reference="UPI-77120",
+                                                             date=(t - timedelta(days=26)).isoformat(), idempotency_key=key()), acc)
     p1 = await fin.record_payment(inv1["id"], fin.PaymentIn(amount=inv1["total"], method="bank_transfer", reference="UTR4421980",
                                                              date=(t - timedelta(days=50)).isoformat(), idempotency_key=key()), acc)
     p2 = await fin.record_payment(inv2["id"], fin.PaymentIn(amount=20000, method="upi", reference="UPI-88231",
                                                              date=(t - timedelta(days=30)).isoformat(), idempotency_key=key()), acc)
-    for inv, days in ((inv1, 62), (inv2, 40), (inv3, 8)):
+    for inv, days in ((inv1, 62), (inv2, 40), (inv3, 8), (inv6, 30)):
         issued = t - timedelta(days=days)
         await db.invoices.update_one({"id": inv["id"]}, {"$set": {"issue_date": issued.isoformat(),
                                                                    "due_date": (issued + timedelta(days=15)).isoformat(),
                                                                    "created_at": _iso(issued, 16)}})
-    for pay, days in ((p1, 50), (p2, 30)):
+    for pay, days in ((p1, 50), (p2, 30), (p6, 26)):
         await db.ledger_entries.update_many({"ref_id": pay["invoice_id"], "account": {"$regex": "^revenue:"}},
                                             {"$set": {"posted_at": _iso(t - timedelta(days=days), 12)}})
     mk = await fin.new_invoice(fin.InvoiceIn(type="marketing", customer_name="Kongu Textiles LLP",
@@ -552,20 +780,73 @@ async def seed_demo():
     await stay(props[6], "Neha Kapoor", "+919000000307", 14, 2, "airbnb", 15, "confirmed", False, 2)
     b_c = await stay(props[13], "Imran Khan", "+919000000308", 20, 2, "direct", 0, "confirmed", False, 2)
     await ops.cancel_booking(b_c["id"], ops.CancelBookingIn(reason="Guest changed travel plans", refund_amount=1500), ss)
+    await stay(props[16], "Harish & friends", "+919000000309", -20, 2, "airbnb", 15, "completed", True, 7, 6500)
+    await stay(props[16], "Meenakshi Sundar", "+919000000310", -9, 3, "direct", 0, "completed", True, 6)
+    await stay(props[16], "Rohit Varma", "+919000000311", 9, 2, "agoda", 18, "confirmed", False, 5)
+
+    # one calendar per home, shared with the booking platforms (iCal links); pricing with weekend and festival rates
+    def season(name, m1, d1, m2, d2, rate):
+        y = t.year
+        s_, e_ = datetime(y, m1, d1).date(), datetime(y + (1 if m2 < m1 else 0), m2, d2).date()
+        if e_ < t:
+            s_, e_ = s_.replace(year=s_.year + 1), e_.replace(year=e_.year + 1)
+        return chan.Season(name=name, start=s_.isoformat(), end=e_.isoformat(), rate=rate)
+    await chan.set_pricing(props[6]["id"], chan.PricingIn(base_rate=3200, weekend_rate=3800, cleaning_fee=600, min_nights=1,
+                                                          weekly_discount_pct=10, included_guests=4, extra_guest_fee=300,
+                                                          seasons=[season("Christmas & New Year", 12, 24, 1, 1, 4200),
+                                                                   season("Pongal", 1, 13, 1, 17, 4500)]), ss)
+    await chan.set_pricing(props[13]["id"], chan.PricingIn(base_rate=1800, weekend_rate=2100, cleaning_fee=300, min_nights=1,
+                                                           weekly_discount_pct=12, monthly_discount_pct=30, included_guests=2), ss)
+    await chan.set_pricing(props[16]["id"], chan.PricingIn(base_rate=5500, weekend_rate=6500, cleaning_fee=1000, min_nights=1,
+                                                           included_guests=6, extra_guest_fee=500,
+                                                           seasons=[season("Christmas & New Year", 12, 24, 1, 1, 7500)]), ss)
+    channels = {}
+    for prop, plats in ((props[6], ("airbnb", "booking_com", "makemytrip")), (props[13], ("airbnb", "booking_com")),
+                        (props[16], ("airbnb", "agoda"))):
+        for pl in plats:
+            channels[(prop["id"], pl)] = await chan.add_channel(chan.ChannelIn(property_id=prop["id"], platform=pl), ss)
+
+    def ics(events):
+        out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Sample platform//EN"]
+        for uid, a_, b_, summary in events:
+            out += ["BEGIN:VEVENT", f"UID:{uid}", f"DTSTART;VALUE=DATE:{(t + timedelta(days=a_)).strftime('%Y%m%d')}",
+                    f"DTEND;VALUE=DATE:{(t + timedelta(days=b_)).strftime('%Y%m%d')}", f"SUMMARY:{summary}", "END:VEVENT"]
+        return "\r\n".join(out + ["END:VCALENDAR"])
+    # Airbnb: a new reservation (guest details to be added) and owner-closed dates; Booking.com: a clash with a direct booking
+    await chan.sync_channel(channels[(props[6]["id"], "airbnb")],
+                            ics([("HMABC123@airbnb.com", 20, 23, "Reserved"), ("blk-1@airbnb.com", 30, 32, "Airbnb (Not available)")]))
+    await chan.sync_channel(channels[(props[6]["id"], "booking_com")], ics([("bk-5512@booking.com", 45, 47, "CLOSED - Not available")]))
+    await chan.sync_channel(channels[(props[6]["id"], "makemytrip")], ics([("mmt-88412@makemytrip.com", 7, 9, "Reserved")]))
+    await chan.sync_channel(channels[(props[16]["id"], "airbnb")], ics([("HMXYZ789@airbnb.com", 16, 18, "Reserved")]))
+    await chan.add_block(chan.BlockIn(property_id=props[16]["id"], start=(t + timedelta(days=40)).isoformat(),
+                                      end=(t + timedelta(days=43)).isoformat(), reason="owner_stay", note="Owner's family visit"), ss)
+    # a guest asked for dates on the website and is waiting for a call back
+    req = await ops.make_booking(ops.BookingIn(property_id=props[16]["id"], guest_name="Deepika Ramesh", guest_phone=L[15]["phone"],
+                                               guests=8, check_in=(t + timedelta(days=24)).isoformat(),
+                                               check_out=(t + timedelta(days=26)).isoformat(), nightly_rate=6000, cleaning_fee=1000,
+                                               platform="website", platform_fee=0, notes="Weekend trip with cousins; vegetarian cook if possible"),
+                                 None, "requested", "website", {"lead_id": L[15]["id"], "quote_total": 14000})
+    await db.bookings.update_one({"id": req["id"]}, {"$set": {"created_at": _iso(t - timedelta(days=1), 19)}})
 
     # ---------- company expenses (last six months) ----------
+    branch_costs = [("br-erode", 18000, 24000, 6000), ("br-perundurai", 22000, 26000, 5000), ("br-sathyamangalam", 9000, 12000, 2500),
+                    ("br-namakkal", 10000, 12000, 3000), ("br-kadambur", 6000, 8000, 1000)]
     for m in range(5, -1, -1):
         mday = _month_shift(t, -m)
-        for cat, desc, amt in (("office_rent", "Erode office rent", 18000), ("salaries", "Field staff incentives", 24000 + m * 500),
-                               ("marketing", "Facebook & Instagram listing ads", 6000 + (m % 3) * 1500),
-                               ("software", "Phone & internet", 2400)):
-            day = min(mday.replace(day=7 if cat != "marketing" else 15), t)
-            e = await fin.new_expense(fin.ExpenseIn(date=day.isoformat(), category=cat, description=desc, amount=amt,
-                                                    vendor="Meta Platforms" if cat == "marketing" else None), acc)
-            await db.ledger_entries.update_many({"ref_id": e["id"]}, {"$set": {"posted_at": _iso(day, 18)}})
+        for br, rent, staff_cost, ads in branch_costs:
+            town = next(b["name"] for b in BRANCHES if b["id"] == br)
+            for cat, desc, amt in (("office_rent", f"{town} office rent", rent), ("salaries", f"{town} field staff incentives", staff_cost + m * 500),
+                                   ("marketing", f"{town} listing ads (Facebook & Instagram)", ads + (m % 3) * 500),
+                                   ("software", f"{town} phone & internet", 2400 if br != "br-kadambur" else 1200)):
+                day = min(mday.replace(day=7 if cat != "marketing" else 15), t)
+                e = await fin.new_expense(fin.ExpenseIn(date=day.isoformat(), category=cat, description=desc, amount=amt, branch_id=br,
+                                                        vendor="Meta Platforms" if cat == "marketing" else None), acc)
+                await db.ledger_entries.update_many({"ref_id": e["id"]}, {"$set": {"posted_at": _iso(day, 18)}})
     # older brokerage income for a fuller 6-month trend
-    for m, amt, who in ((5, 45000, "Ravi Textiles"), (4, 62000, "Sundar & Co"), (3, 38000, "Velmurugan K")):
-        inv = await fin.new_invoice(fin.InvoiceIn(type="brokerage", customer_name=who,
+    for m, amt, who, br in ((5, 45000, "Ravi Textiles", "br-perundurai"), (4, 62000, "Sundar & Co", "br-erode"),
+                            (3, 38000, "Velmurugan K", "br-sathyamangalam"), (2, 54000, "Sri Kumaran Spinning Mills", "br-perundurai"),
+                            (1, 26000, "Gowtham R", "br-namakkal"), (2, 18000, "Selvi Farms", "br-kadambur")):
+        inv = await fin.new_invoice(fin.InvoiceIn(type="brokerage", customer_name=who, branch_id=br,
                                                   lines=[fin.LineIn(description="Brokerage commission", qty=1, rate=amt)]), acc)
         day = _month_shift(t, -m).replace(day=20)
         pay = await fin.record_payment(inv["id"], fin.PaymentIn(amount=amt, method="bank_transfer", date=day.isoformat(),
@@ -600,6 +881,25 @@ async def seed_demo():
         idx = next(i for i, x in enumerate(POSTS) if x[0] == i_p["title"])
         await db.posts.update_one({"id": i_p["id"]}, {"$set": {"cover_image": covers[idx]}})
 
+    # an investor-only project update and an article scheduled for later
+    p_inv = await content.create_post(content.PostIn(
+        title="SIPCOT shed: tenant renews for three more years", category="project_update", audience="investors",
+        excerpt="The textile unit leasing the SIPCOT shed has signed a three-year renewal with a 5% yearly increase.",
+        body="## What changed\n\nThe tenant in the SIPCOT industrial shed has renewed for three more years, with rent going up 5% "
+             "each year. The security deposit was topped up to match the new rent.\n\n## What it means for you\n\n"
+             "Quarterly payouts continue as before. The new rent applies from next quarter's payout.\n\n"
+             "Questions? Call your relationship manager or reply from your dashboard.", tags=["sipcot", "renewal"]), users["marketing"])
+    await content.update_post(p_inv["id"], {"status": "published"}, director)
+    await db.posts.update_one({"id": p_inv["id"]}, {"$set": {"published_at": _iso(t - timedelta(days=12), 10), "cover_image": "/images/shed.jpg"}})
+    p_sch = await content.create_post(content.PostIn(
+        title="Namakkal property guide: localities, prices and rentals", category="area_guide",
+        excerpt="Where people are buying and renting in Namakkal, and what to check before you do.",
+        body="## Localities\n\nMohanur Road, Paramathi Road and Trichy Road see the most enquiries for homes and shops.\n\n"
+             "## Before you buy\n\nCheck the patta, the encumbrance certificate and the approved plan, and walk the boundaries "
+             "with the survey sketch.\n\n## Renting\n\nShops on main roads near the bus stand let quickly when priced right.",
+        tags=["namakkal"], cover_image="/images/house.jpg"), users["marketing"])
+    await content.update_post(p_sch["id"], {"status": "scheduled", "publish_at": _iso(t + timedelta(days=3), 9)}, director)
+
     await db.campaigns.insert_many([
         {"id": new_id(), "name": "Diwali 2026 – homes", "code": "diwali", "channel": "social", "budget": 15000,
          "start_date": (t - timedelta(days=20)).isoformat(), "created_at": now_iso()},
@@ -612,6 +912,102 @@ async def seed_demo():
          "name": "Sample owner, Perundurai Road"},
         {"quote": "Sample review: Straightforward about brokerage from the first call. The site visits were well organised.",
          "name": "Sample buyer, Thindal"}]}})
+    # ---------- co-investors ----------
+    projects = []
+    for name, kind, city, loc, prop, br, raise_, mn, irr, yld, months, horizon, status, desc, cover in (
+            ("SIPCOT Industrial Shed – Rental Pool", "commercial_lease", "Perundurai", "SIPCOT", props[3], "br-perundurai", 12000000, 1000000,
+             11, 8.5, 15, 60, "operating", "Co-ownership of a leased 12,000 sq.ft industrial shed near the SIPCOT Perundurai gate. "
+             "Income comes from monthly rent; payouts are made every quarter after maintenance and fees.", "/images/shed.jpg"),
+            ("Sathyamangalam Land Bank 2026", "land_bank", "Sathyamangalam", "Mettupalayam Road", None, "br-sathyamangalam", 8000000, 500000,
+             14, None, 8, 36, "funded", "Agricultural and residential-conversion land bought in stages along the Mettupalayam road. "
+             "Returns come from resale; there are no regular payouts.", "/images/land.jpg"),
+            ("Namakkal Retail Units", "commercial_lease", "Namakkal", "Paramathi Road", None, "br-namakkal", 6000000, 500000,
+             10, 8, 1, 60, "open", "Two ground-floor shops on Paramathi Road to be bought and let to retail tenants.", "/images/commercial.jpg")):
+        pr = await invr.new_project(invr.ProjectIn(name=name, kind=kind, city=city, locality=loc, property_ids=[prop["id"]] if prop else [],
+                                                   branch_id=br, target_raise=raise_, min_ticket=mn, target_irr_pct=irr, expected_yield_pct=yld,
+                                                   start_date=(_month_shift(t, -months) + timedelta(days=2)).isoformat(), horizon_months=horizon,
+                                                   description=desc, cover_image=cover, status=status), director)
+        projects.append(pr)
+    P1, P2, P3 = projects
+    investors = []
+    for name, phone, email, kind, city, pan in (("Suresh Palanisamy", "+919000000401", f"investor@{DEMO_DOMAIN}", "individual", "Erode", "4F2K"),
+                                                ("Dr. Kavya Raghunathan", "+919000000402", "kavya@example.com", "nri", "Singapore", "8H1M"),
+                                                ("Kumaravel HUF", "+919000000403", "kumaravel@example.com", "huf", "Perundurai", "2Q7P")):
+        investors.append(await invr.new_investor(invr.InvestorIn(name=name, phone=phone, email=email, kind=kind, city=city, pan_last4=pan,
+                                                                 rm_id=director["id"]), director))
+    I1, I2, I3 = investors
+    invs = {}
+    for inv_, prj, amt, months, days, ref in ((I1, P1, 4000000, 15, 5, "NEFT-SP-0001"), (I2, P1, 5000000, 14, 10, "SWIFT-KR-2210"),
+                                              (I3, P1, 3000000, 13, 3, "RTGS-KH-1182"), (I1, P2, 2000000, 8, 4, "NEFT-SP-0002"),
+                                              (I3, P2, 2500000, 7, 12, "RTGS-KH-1190"), (I2, P2, 1500000, 6, 6, "SWIFT-KR-2291")):
+        d_ = (_month_shift(t, -months) + timedelta(days=days)).isoformat()
+        m_ = await invr.add_investment(invr.InvestmentIn(investor_id=inv_["id"], project_id=prj["id"], amount=amt, date=d_,
+                                                         method="bank_transfer", reference=ref), acc)
+        await db.ledger_entries.update_many({"ref_id": m_["id"]}, {"$set": {"posted_at": _iso(datetime.fromisoformat(d_).date(), 12)}})
+        invs[(inv_["id"], prj["id"])] = m_
+    for prj, months, value, method, note in ((P1, 9, 12600000, "valuer", "Annual valuation by an empanelled valuer"),
+                                             (P1, 1, 13400000, "valuer", "Valuation after the lease renewal"),
+                                             (P2, 2, 6600000, "guideline", "Guideline value plus recent sales nearby")):
+        await invr.add_valuation(prj["id"], invr.ValuationIn(date=(_month_shift(t, -months) + timedelta(days=14)).isoformat(), value=value,
+                                                             method=method, note=note), director)
+    for q in (12, 9, 6, 3):
+        d_ = _month_shift(t, -q) + timedelta(days=9)
+        period = f"{_month_shift(d_, -3).strftime('%b')}–{_month_shift(d_, -1).strftime('%b %Y')}"
+        res = await invr.distribute(P1["id"], invr.DistributeIn(date=d_.isoformat(), kind="rental_income", amount=255000, tds_pct=10,
+                                                                period=period, reference=f"NEFT-BATCH-{q:02d}"), acc)
+        for r in res["rows"]:
+            await db.ledger_entries.update_many({"ref_id": r["id"]}, {"$set": {"posted_at": _iso(d_, 15)}})
+    for prj, days, title, body in ((P1, 40, "Rent received for the quarter", "All three months' rent was received on time. The payout "
+                                                                                "will be made on the 10th."),
+                                   (P1, 12, "Tenant renewal signed", "The tenant renewed for three more years with a 5% yearly increase."),
+                                   (P2, 25, "Survey and fencing done", "The land was re-surveyed and fenced. Patta transfer for the "
+                                                                      "second parcel is in progress.")):
+        await db.inv_projects.update_one({"id": prj["id"]}, {"$push": {"updates": {
+            "id": new_id(), "title": title, "body": body, "by": director["name"], "at": _iso(t - timedelta(days=days), 11)}}})
+    # investor dashboard login for Suresh Palanisamy
+    await db.users.update_one({"email": f"investor@{DEMO_DOMAIN}"}, {"$setOnInsert": {
+        "id": new_id(), "email": f"investor@{DEMO_DOMAIN}", "name": I1["name"], "role": "investor", "investor_id": I1["id"],
+        "active": True, "branch_ids": [], "password_hash": hash_password(pw), "created_at": _iso(t - timedelta(days=400))}}, upsert=True)
+    rep_pdf = make_pdf("Quarterly Project Report – SIPCOT Industrial Shed", company,
+                       [("Project", P1["name"]), ("Period", "Last quarter"), ("Occupancy", "100% (one tenant)"),
+                        ("Rent collected", "3 of 3 months"), ("Next payout", "10th of next month")],
+                       ["Item", "Amount (Rs.)"], [["Rent received", "5,40,000"], ["Maintenance & insurance", "(18,000)"],
+                                                  ["Management fee", "(27,000)"], ["Set aside for repairs", "(2,40,000)"],
+                                                  ["Paid out to investors", "2,55,000"]], [],
+                       "Sample report for the demo. Figures are illustrative.")
+    stored = new_id()
+    (UPLOAD_DIR / stored).write_bytes(rep_pdf)
+    await db.documents.insert_one({"id": new_id(), "stored_name": stored, "size": len(rep_pdf), "content_type": "application/pdf",
+                                   "original_name": "Quarterly report – SIPCOT shed.pdf", "entity_type": "inv_project", "entity_id": P1["id"],
+                                   "doc_type": "report", "expiry_date": None, "notes": None, "version": 1, "is_latest": True,
+                                   "previous_id": None, "public_approved": False, "share_with_investor": True, "uploaded_by": director["id"],
+                                   "uploaded_by_name": director["name"], "created_at": _iso(t - timedelta(days=40))})
+
+    # ---------- agreements (stamp-paper layout, Word / PDF) ----------
+    await db.settings.update_one({"id": "company"}, {"$set": {"agreement_signatory": director["name"],
+                                                              "agreement_signatory_designation": "Managing Director"}})
+    from core import clear_settings_cache
+    clear_settings_cache()
+
+    async def agreement(tpl, etype, eid, who, extra=None, final=False, share=False, estamp=None):
+        data, _ = await agr.prefill(tpl, etype, eid, who)
+        a = await agr.create(agr.AgreementIn(template=tpl, entity_type=etype, entity_id=eid, data={**data, **(extra or {})},
+                                             estamp_no=estamp, estamp_date=t.isoformat() if estamp else None), who)
+        if final:
+            await agr.finalise(a["id"], {"share": share}, who)
+        return a
+    await agreement("rental_residential", "lease", ls1["id"], pm, {"lessor_address": "12, Gandhi Street, Erode 638011",
+                                                                 "lessee_address": "Flat 3B, Perundurai Road, Erode 638011",
+                                                                 "lessee_age": 38, "lessor_age": 52}, final=True, share=True,
+                    estamp="IN-TN00000000000000X")
+    await agreement("lease_commercial", "lease", ls2["id"], pm, {"lessor_address": "12, Gandhi Street, Erode 638011"})
+    await agreement("brokerage_authorisation", "property", props[0]["id"], bm)
+    await agreement("investor_coinvestment", "investment", invs[(I1["id"], P1["id"])]["id"], director,
+                    {"investor_address": "45, Teachers Colony, Erode 638011"}, final=True, share=True)
+    await customers_demo(owners)
+    await db.settings.update_one({"id": "company"}, {"$set": {"targets": {"monthly_revenue": {
+        "br-erode": 150000, "br-perundurai": 120000, "br-namakkal": 50000, "br-sathyamangalam": 40000, "br-kadambur": 20000}}}})
+
     # leave a couple of fresh notifications for the director
     from core import notify
     await notify([users["director"]["id"], admin["id"]], "Approval needed: commission change",
@@ -619,7 +1015,20 @@ async def seed_demo():
     logger.info("Demo data seeded")
 
 
+async def customers_demo(owners):
+    from routes_customers import backfill_customers
+    await backfill_customers()
+    for o, tags in ((owners[2], ["nri", "priority"]), (owners[3], ["corporate"]), (owners[1], ["owner-portal"])):
+        oc = await db.owners.find_one({"id": o["id"]}, {"_id": 0, "customer_id": 1})
+        if oc and oc.get("customer_id"):
+            await db.customers.update_one({"id": oc["customer_id"]}, {"$addToSet": {"tags": {"$each": tags}}})
+    for i in await db.investors.find({}, {"_id": 0, "customer_id": 1, "kind": 1}).to_list(100):
+        if i.get("customer_id"):
+            await db.customers.update_one({"id": i["customer_id"]}, {"$addToSet": {"tags": {"$each": ["investor"] + (["nri"] if i["kind"] == "nri" else [])}}})
+
+
 async def seed():
     await ensure_indexes()
     await seed_core()
     await seed_demo()
+    await migrate()

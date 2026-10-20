@@ -4,6 +4,7 @@ import asyncio
 import uuid
 import time
 import logging
+from contextvars import ContextVar
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -50,37 +51,50 @@ ROLES = {
     "shortstay_ops": "Short-Stay Operations",
     "auditor": "Read-Only Auditor",
     "owner": "Property Owner (portal)",
+    "investor": "Investor (portal)",
 }
-STAFF_ROLES = [r for r in ROLES if r != "owner"]
-MODULES = ["dashboard", "leads", "properties", "owners", "deals", "finance", "leases", "maintenance",
-           "shortstay", "documents", "tasks", "reports", "cms", "users", "settings", "audit"]
+PORTAL_ROLES = ("owner", "investor")
+STAFF_ROLES = [r for r in ROLES if r not in PORTAL_ROLES]
+MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases",
+           "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users",
+           "settings", "audit"]
 # r=read w=write a=approve e=export p=publish
 PERMS = {
     "super_admin": {m: "rwaep" for m in MODULES},
     "director": {**{m: "rwae" for m in MODULES}, "users": "r", "settings": "r", "properties": "rwaep", "cms": "rwp"},
-    "branch_manager": {"dashboard": "r", "leads": "rwe", "properties": "rwaep", "owners": "rw", "deals": "rwe",
-                       "finance": "r", "leases": "rw", "maintenance": "rw", "shortstay": "rw", "documents": "rw",
-                       "tasks": "rw", "reports": "re", "cms": "rwp", "users": "r"},
-    "sales_agent": {"dashboard": "r", "leads": "rw", "properties": "rw", "owners": "r", "deals": "rw",
-                    "tasks": "rw", "documents": "rw"},
-    "property_manager": {"dashboard": "r", "properties": "r", "owners": "r", "leases": "rw", "maintenance": "rw",
-                         "documents": "rw", "tasks": "rw"},
-    "accountant": {"dashboard": "r", "finance": "rwe", "deals": "r", "leases": "r", "shortstay": "r", "owners": "r",
-                   "reports": "re", "tasks": "rw", "maintenance": "r"},
+    "branch_manager": {"dashboard": "r", "ceo": "re", "leads": "rwe", "customers": "rwe", "properties": "rwaep",
+                       "owners": "rw", "deals": "rwe", "finance": "r", "leases": "rw", "maintenance": "rw",
+                       "shortstay": "rw", "documents": "rw", "agreements": "rw", "tasks": "rw", "reports": "re",
+                       "cms": "rwp", "users": "r"},
+    "sales_agent": {"dashboard": "r", "leads": "rw", "customers": "rw", "properties": "rw", "owners": "r",
+                    "deals": "rw", "tasks": "rw", "documents": "rw", "agreements": "rw"},
+    "property_manager": {"dashboard": "r", "properties": "r", "owners": "r", "customers": "r", "leases": "rw",
+                         "maintenance": "rw", "documents": "rw", "agreements": "rw", "tasks": "rw"},
+    "accountant": {"dashboard": "r", "ceo": "re", "finance": "rwe", "deals": "r", "leases": "r", "shortstay": "r",
+                   "owners": "r", "customers": "r", "investors": "rwe", "agreements": "r", "reports": "re",
+                   "tasks": "rw", "maintenance": "r"},
     "marketing": {"dashboard": "r", "properties": "rp", "cms": "rwp", "leads": "r", "tasks": "rw"},
     "shortstay_ops": {"dashboard": "r", "shortstay": "rw", "maintenance": "rw", "properties": "r", "tasks": "rw",
                       "documents": "r"},
-    "auditor": {"dashboard": "r", "leads": "r", "properties": "r", "owners": "r", "deals": "r", "finance": "r",
-                "leases": "r", "maintenance": "r", "shortstay": "r", "reports": "re", "audit": "r"},
-    # Owners use the separate owner portal (/api/portal/*), which is scoped to their own owner record.
+    "auditor": {"dashboard": "r", "ceo": "re", "leads": "r", "customers": "r", "properties": "r", "owners": "r",
+                "deals": "r", "finance": "r", "leases": "r", "maintenance": "r", "shortstay": "r", "investors": "r",
+                "agreements": "r", "reports": "re", "audit": "r"},
+    # Owners and investors use their own portals (/api/portal/*, /api/investor/*), scoped to their own records.
     "owner": {},
+    "investor": {},
 }
 # Record scope: these roles only see records where field == their user id
 OWN_SCOPE = {
-    "sales_agent": {"leads": "assigned_to", "deals": "assigned_to", "properties": "assigned_agent"},
+    "sales_agent": {"leads": "assigned_to", "deals": "assigned_to", "properties": "assigned_agent", "customers": "rm_id"},
     "property_manager": {"properties": "assigned_manager", "leases": "manager_id"},
 }
-BRANCH_SCOPED = ("leads", "properties", "deals")
+# Modules whose records carry a branch_id. People with branches set on their account see only those branches;
+# super admins and directors see every branch. The branch picker in the staff app narrows any view to one branch.
+BRANCH_SCOPED = ("leads", "customers", "properties", "deals", "leases", "shortstay", "maintenance", "finance",
+                 "agreements", "ceo")
+ALL_BRANCH_ROLES = ("super_admin", "director")
+# Branch chosen in the staff app's picker for this request (header X-Branch); empty = all the person may see.
+REQ_BRANCH: ContextVar = ContextVar("req_branch", default=None)
 
 
 def now():
@@ -172,12 +186,17 @@ def mfa_required_for(user, settings) -> bool:
     return user.get("role") in (settings.get("mfa_required_roles") or [])
 
 
+PROFILE_FIELDS = ("designation", "department", "reports_to", "whatsapp", "show_in_directory", "joined_on")
+
+
 def public_user(u, settings=None):
     out = {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": u["role"],
            "role_label": ROLES.get(u["role"]), "branch_ids": u.get("branch_ids", []), "active": u.get("active"),
            "phone": u.get("phone"), "permissions": PERMS.get(u["role"], {}), "created_at": u.get("created_at"),
            "mfa_enabled": bool(u.get("mfa_enabled")), "owner_id": u.get("owner_id"),
-           "last_login": u.get("last_login")}
+           "investor_id": u.get("investor_id"), "last_login": u.get("last_login"),
+           "all_branches": u["role"] in ALL_BRANCH_ROLES or not u.get("branch_ids"),
+           **{k: u.get(k) for k in PROFILE_FIELDS}}
     if settings is not None:
         out["mfa_setup_required"] = mfa_required_for(u, settings) and not u.get("mfa_enabled")
     return out
@@ -205,10 +224,11 @@ async def current_user(request: Request):
         raise HTTPException(401, "Session expired or revoked")
     user = await db.users.find_one({"id": payload.get("sub"), "active": True},
                                    {"_id": 0, "password_hash": 0, "mfa_secret": 0, "mfa_pending_secret": 0,
-                                    "mfa_recovery": 0})
+                                    "mfa_recovery": 0, "photo": 0})
     if not user:
         raise HTTPException(401, "Account not active")
     user["sid"] = sess["sid"]
+    REQ_BRANCH.set((request.headers.get("x-branch") or "").strip()[:40] or None)
     if not user.get("mfa_enabled") and not request.url.path.startswith(MFA_EXEMPT):
         if mfa_required_for(user, await get_settings_cached()):
             raise HTTPException(403, "mfa_setup_required")
@@ -217,7 +237,7 @@ async def current_user(request: Request):
 
 async def staff_user(request: Request):
     user = await current_user(request)
-    if user["role"] == "owner":
+    if user["role"] in PORTAL_ROLES:
         raise HTTPException(403, "This area is for staff accounts")
     return user
 
@@ -226,6 +246,13 @@ async def owner_user(request: Request):
     user = await current_user(request)
     if user["role"] != "owner" or not user.get("owner_id"):
         raise HTTPException(403, "This area is for property owners")
+    return user
+
+
+async def investor_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "investor" or not user.get("investor_id"):
+        raise HTTPException(403, "This area is for investors")
     return user
 
 
@@ -242,13 +269,49 @@ def require(module, action):
     return dep
 
 
+def allowed_branches(user):
+    """None = every branch; otherwise the branch ids on the person's account."""
+    if not user or user.get("role") in ALL_BRANCH_ROLES or not user.get("branch_ids"):
+        return None
+    return list(user["branch_ids"])
+
+
+def branch_filter(user, field="branch_id", selected=None):
+    """Mongo filter for the branches this person may see, narrowed to the branch picked in the app (if any)."""
+    allowed = allowed_branches(user)
+    sel = selected if selected is not None else REQ_BRANCH.get()
+    if sel and sel != "all" and (allowed is None or sel in allowed):
+        return {field: sel}
+    if allowed is not None:
+        return {field: {"$in": allowed}}
+    return {}
+
+
+def in_branch(user, branch_id) -> bool:
+    allowed = allowed_branches(user)
+    return allowed is None or branch_id in allowed
+
+
+def check_branch(user, branch_id):
+    if branch_id and not in_branch(user, branch_id):
+        raise HTTPException(403, "You can only work with records of your own branch")
+
+
+def home_branch(user):
+    """Branch for new records made in the 'all branches' view: the picked branch, else the person's first branch."""
+    sel = REQ_BRANCH.get()
+    if sel and sel != "all" and in_branch(user, sel):
+        return sel
+    return (user.get("branch_ids") or [None])[0] if user else None
+
+
 def scope(user, module):
     f = {}
     field = OWN_SCOPE.get(user["role"], {}).get(module)
     if field:
         f[field] = user["id"]
-    if user["role"] == "branch_manager" and user.get("branch_ids") and module in BRANCH_SCOPED:
-        f["branch_id"] = {"$in": user["branch_ids"] + [None]}
+    if module in BRANCH_SCOPED:
+        f.update(branch_filter(user))
     return f
 
 
@@ -344,21 +407,49 @@ async def notify(user_ids, title, body="", link="", dedupe=None, kind="info"):
 
 
 async def notify_roles(roles, title, body="", link="", dedupe=None, kind="info", branch_id=None):
+    """People with branches on their account are told only about their own branches' records."""
     q = {"role": {"$in": roles}, "active": True}
     users = await db.users.find(q, {"_id": 0, "id": 1, "role": 1, "branch_ids": 1}).to_list(500)
-    ids = [u["id"] for u in users if u["role"] != "branch_manager" or not branch_id
-           or not u.get("branch_ids") or branch_id in u["branch_ids"]]
+    ids = [u["id"] for u in users if not branch_id or allowed_branches(u) is None or branch_id in u["branch_ids"]]
     await notify(ids, title, body, link, dedupe, kind)
 
 
-async def post_ledger(ledger, direction, amount, ref_type, ref_id, description, user, party=None, account=None):
+# ---------------- Branches & locations ----------------
+async def head_office_id():
+    b = await db.branches.find_one({"is_head_office": True, "active": {"$ne": False}}, {"_id": 0, "id": 1})
+    if not b:
+        b = await db.branches.find_one({"active": {"$ne": False}}, {"_id": 0, "id": 1}, sort=[("order", 1)])
+    return b["id"] if b else None
+
+
+async def branch_for_place(city=None, locality=None):
+    """Branch that looks after a town / locality: from the locations list, else a branch in that town, else head office."""
+    import re as _re
+    if city:
+        rx = {"$regex": f"^{_re.escape(city.strip())}$", "$options": "i"}
+        if locality:
+            loc = await db.locations.find_one({"kind": "locality", "city": rx, "name": {
+                "$regex": f"^{_re.escape(locality.strip())}$", "$options": "i"}}, {"_id": 0, "branch_id": 1})
+            if loc and loc.get("branch_id"):
+                return loc["branch_id"]
+        c = await db.locations.find_one({"kind": "city", "name": rx}, {"_id": 0, "branch_id": 1})
+        if c and c.get("branch_id"):
+            return c["branch_id"]
+        b = await db.branches.find_one({"city": rx, "active": {"$ne": False}}, {"_id": 0, "id": 1})
+        if b:
+            return b["id"]
+    return await head_office_id()
+
+
+async def post_ledger(ledger, direction, amount, ref_type, ref_id, description, user, party=None, account=None,
+                      branch_id=None):
     amount = round(float(amount), 2)
     if amount <= 0:
         return None
     entry = {"id": new_id(), "code": await next_code("ledger", "LE-", 6), "ledger": ledger, "direction": direction,
              "amount": amount, "account": account or ref_type, "ref_type": ref_type, "ref_id": ref_id,
              "party": party, "description": description, "posted_by": user["id"] if user else None,
-             "posted_at": now_iso(), "reversal_of": None, "reversed": False}
+             "posted_at": now_iso(), "reversal_of": None, "reversed": False, "branch_id": branch_id}
     await db.ledger_entries.insert_one(dict(entry))
     return entry
 

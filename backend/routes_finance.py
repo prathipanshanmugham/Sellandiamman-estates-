@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from pymongo.errors import DuplicateKeyError
 from core import db, now_iso, new_id, next_code, require, can, audit, post_ledger, get_settings, today_ist, \
-    notify_roles
+    notify_roles, scope, branch_filter, check_branch, home_branch, head_office_id
 from logic import calc_invoice, LEDGERS
 from pdf import make_pdf, inr
 
@@ -32,6 +32,8 @@ async def create_invoice_doc(data, user):
            "customer_gstin": data.get("customer_gstin"), **calc, "paid": 0.0, "credited": 0.0, "status": "issued",
            "issue_date": t.isoformat(), "due_date": (t + timedelta(days=int(s.get("invoice_due_days", 15)))).isoformat(),
            "deal_id": data.get("deal_id"), "booking_id": data.get("booking_id"), "owner_id": data.get("owner_id"),
+           "customer_id": data.get("customer_id"),
+           "branch_id": data.get("branch_id") or home_branch(user) or await head_office_id(),
            "notes": data.get("notes"), "created_by": user["id"], "created_at": now_iso()}
     try:
         await db.invoices.insert_one(dict(inv))
@@ -52,6 +54,8 @@ class InvoiceIn(BaseModel):
     customer_name: str = Field(min_length=2, max_length=150)
     customer_phone: Optional[str] = None
     customer_gstin: Optional[str] = Field(None, max_length=15)
+    customer_id: Optional[str] = None
+    branch_id: Optional[str] = None
     lines: List[LineIn]
     notes: Optional[str] = None
 
@@ -91,6 +95,7 @@ class ExpenseIn(BaseModel):
 @router.get("/invoices")
 async def list_invoices(status: Optional[str] = None, user=Depends(require("finance", "r"))):
     f = {"status": status} if status else {}
+    f.update(scope(user, "finance"))
     return await db.invoices.find(f, {"_id": 0}).sort("created_at", -1).to_list(2000)
 
 
@@ -98,12 +103,14 @@ async def list_invoices(status: Optional[str] = None, user=Depends(require("fina
 async def new_invoice(body: InvoiceIn, user=Depends(require("finance", "w"))):
     if body.type not in INV_TYPES:
         raise HTTPException(422, "Invalid invoice type")
+    if body.branch_id:
+        check_branch(user, body.branch_id)
     return await create_invoice_doc({**body.model_dump(), "lines": [ln.model_dump() for ln in body.lines]}, user)
 
 
 @router.get("/invoices/{iid}")
 async def get_invoice(iid: str, user=Depends(require("finance", "r"))):
-    inv = await db.invoices.find_one({"id": iid}, {"_id": 0})
+    inv = await db.invoices.find_one({"id": iid, **scope(user, "finance")}, {"_id": 0})
     if not inv:
         raise HTTPException(404, "Invoice not found")
     inv["payments"] = await db.payments.find({"invoice_id": iid}, {"_id": 0}).to_list(100)
@@ -113,7 +120,7 @@ async def get_invoice(iid: str, user=Depends(require("finance", "r"))):
 
 @router.post("/invoices/{iid}/payments")
 async def record_payment(iid: str, body: PaymentIn, user=Depends(require("finance", "w"))):
-    inv = await db.invoices.find_one({"id": iid}, {"_id": 0})
+    inv = await db.invoices.find_one({"id": iid, **scope(user, "finance")}, {"_id": 0})
     if not inv:
         raise HTTPException(404, "Invoice not found")
     pay = {"id": new_id(), "receipt_no": None, "invoice_id": iid, "invoice_number": inv["number"],
@@ -135,7 +142,7 @@ async def record_payment(iid: str, body: PaymentIn, user=Depends(require("financ
     status = "paid" if fresh["paid"] + fresh["credited"] >= fresh["total"] - 0.001 else "partially_paid"
     await db.invoices.update_one({"id": iid}, {"$set": {"status": status}})
     await post_ledger("company", "in", body.amount, "invoice", iid, f"Receipt {rno} against {inv['number']}", user,
-                      inv["customer_name"], f"revenue:{inv['type']}")
+                      inv["customer_name"], f"revenue:{inv['type']}", inv.get("branch_id"))
     await audit(user, "payment_recorded", "finance", iid, {"amount": body.amount, "receipt": rno})
     return {**pay, "receipt_no": rno, "invoice_status": status}
 
@@ -154,7 +161,7 @@ async def apply_credit_note(inv, payload, user):
     await db.credit_notes.insert_one(dict(cn))
     if payload.get("refund"):
         await post_ledger("company", "out", amount, "credit_note", cn["id"], f"Refund {cn['number']} on {inv['number']}",
-                          user, inv["customer_name"], "refund")
+                          user, inv["customer_name"], "refund", inv.get("branch_id"))
         await db.invoices.update_one({"id": inv["id"]}, {"$inc": {"paid": -amount}})
     fresh = await db.invoices.find_one({"id": inv["id"]}, {"_id": 0})
     status = "paid" if fresh["paid"] + fresh["credited"] >= fresh["total"] - 0.001 else (
@@ -168,7 +175,7 @@ async def apply_credit_note(inv, payload, user):
 
 @router.post("/invoices/{iid}/credit-note")
 async def credit_note(iid: str, body: CreditIn, user=Depends(require("finance", "w"))):
-    inv = await db.invoices.find_one({"id": iid}, {"_id": 0})
+    inv = await db.invoices.find_one({"id": iid, **scope(user, "finance")}, {"_id": 0})
     if not inv:
         raise HTTPException(404, "Invoice not found")
     if body.refund and body.amount > inv["paid"]:
@@ -187,7 +194,7 @@ async def credit_note(iid: str, body: CreditIn, user=Depends(require("finance", 
 
 @router.get("/invoices/{iid}/pdf")
 async def invoice_pdf(iid: str, user=Depends(require("finance", "r"))):
-    inv = await db.invoices.find_one({"id": iid}, {"_id": 0})
+    inv = await db.invoices.find_one({"id": iid, **scope(user, "finance")}, {"_id": 0})
     if not inv:
         raise HTTPException(404, "Invoice not found")
     s = await get_settings()
@@ -218,7 +225,7 @@ async def receipt_pdf(pid: str, user=Depends(require("finance", "r"))):
 
 @router.get("/ledger")
 async def ledger(ledger: Optional[str] = None, ref_id: Optional[str] = None, user=Depends(require("finance", "r"))):
-    f = {}
+    f = branch_filter(user)
     if ledger:
         f["ledger"] = ledger
     if ref_id:
@@ -228,7 +235,7 @@ async def ledger(ledger: Optional[str] = None, ref_id: Optional[str] = None, use
 
 @router.get("/ledger/balances")
 async def balances(user=Depends(require("finance", "r"))):
-    rows = await db.ledger_entries.aggregate([{"$group": {"_id": {"l": "$ledger", "d": "$direction"},
+    rows = await db.ledger_entries.aggregate([{"$match": branch_filter(user)}, {"$group": {"_id": {"l": "$ledger", "d": "$direction"},
                                                           "t": {"$sum": "$amount"}}}]).to_list(50)
     out = {k: {"name": v, "in": 0.0, "out": 0.0, "balance": 0.0} for k, v in LEDGERS.items()}
     for r in rows:
@@ -246,7 +253,7 @@ async def do_reverse(entry, reason, user):
         raise HTTPException(409, "Entry is already reversed or is itself a reversal")
     rev = await post_ledger(entry["ledger"], "out" if entry["direction"] == "in" else "in", entry["amount"],
                             entry["ref_type"], entry["ref_id"], f"Reversal of {entry['code']}: {reason}", user,
-                            entry.get("party"), entry.get("account"))
+                            entry.get("party"), entry.get("account"), entry.get("branch_id"))
     await db.ledger_entries.update_one({"id": rev["id"]}, {"$set": {"reversal_of": entry["id"]}})
     await audit(user, "ledger_reversal", "finance", entry["id"], {"reason": reason})
     return rev
@@ -268,17 +275,21 @@ async def reverse(eid: str, body: ReverseIn, user=Depends(require("finance", "w"
 
 @router.get("/expenses")
 async def list_expenses(user=Depends(require("finance", "r"))):
-    return await db.expenses.find({}, {"_id": 0}).sort("date", -1).to_list(5000)
+    return await db.expenses.find(scope(user, "finance"), {"_id": 0}).sort("date", -1).to_list(5000)
 
 
 @router.post("/expenses")
 async def new_expense(body: ExpenseIn, user=Depends(require("finance", "w"))):
     if body.paid_from == "owner_funds" and not body.owner_id:
         raise HTTPException(422, "Owner is required when paying from owner funds")
+    if body.branch_id:
+        check_branch(user, body.branch_id)
     e = {"id": new_id(), "code": await next_code("expense", "EXP-", 5), **body.model_dump(), "by": user["id"],
          "created_at": now_iso()}
+    e["branch_id"] = body.branch_id or home_branch(user) or await head_office_id()
     await db.expenses.insert_one(dict(e))
     await post_ledger(body.paid_from, "out", body.amount + body.gst_amount, "expense", e["id"],
-                      f"{body.category}: {body.description}", user, body.vendor or body.owner_id, f"expense:{body.category}")
+                      f"{body.category}: {body.description}", user, body.vendor or body.owner_id, f"expense:{body.category}",
+                      e["branch_id"])
     await audit(user, "expense_recorded", "finance", e["id"], {"amount": body.amount})
     return e

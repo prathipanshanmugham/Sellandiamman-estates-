@@ -3,7 +3,7 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from core import (db, now_iso, new_id, next_code, normalize_phone, require, can, scope, is_scoped, get_scoped,
-                  audit, today_ist)
+                  audit, today_ist, check_branch, in_branch, home_branch, branch_for_place)
 from logic import can_transition
 
 router = APIRouter()
@@ -15,9 +15,31 @@ EDITABLE = ["title", "category", "transaction", "ownership_type", "owner_id", "b
             "negotiated_terms", "description_public", "notes_internal", "images", "availability", "occupancy",
             "assigned_agent", "assigned_manager", "source", "service_type", "power_supply", "loading_access",
             "parking", "checkin_instructions", "video_url", "mgmt_fee_pct", "nightly_rate", "max_guests",
-            "service_agreement"]
+            "service_agreement", "geo", "location_public"]
 RESTRICTED_FOR_MARKETING = ["internal_address", "notes_internal", "survey_no", "checkin_instructions",
-                            "negotiated_terms", "service_agreement", "owner_id"]
+                            "negotiated_terms", "service_agreement", "owner_id", "geo"]
+# How precisely the website shows the pin: about 100 m away (default), exactly, or not at all.
+PUBLIC_DECIMALS = {"approximate": 3, "exact": 5, "hidden": None}
+
+
+def geo_fields(geo, mode, user=None, source="pin"):
+    """Stores the captured point privately and derives the public pin from it."""
+    if not geo or geo.get("lat") in (None, "") or geo.get("lng") in (None, ""):
+        return {}
+    try:
+        lat, lng = float(geo["lat"]), float(geo["lng"])
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Location must be a latitude and longitude")
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise HTTPException(422, "Location is out of range")
+    mode = mode if mode in PUBLIC_DECIMALS else "approximate"
+    dec = PUBLIC_DECIMALS[mode]
+    acc = geo.get("accuracy_m")
+    rec = {"lat": round(lat, 6), "lng": round(lng, 6), "accuracy_m": round(float(acc)) if acc not in (None, "") else None,
+           "source": geo.get("source") or source, "captured_at": geo.get("captured_at") or now_iso(),
+           "captured_by": geo.get("captured_by") or (user["name"] if user else None)}
+    return {"geo": rec, "location_public": mode, "public_lat": round(lat, dec) if dec else None,
+            "public_lng": round(lng, dec) if dec else None}
 
 
 class PropertyIn(BaseModel):
@@ -63,6 +85,8 @@ class PropertyIn(BaseModel):
     nightly_rate: Optional[float] = Field(None, ge=0)
     max_guests: Optional[int] = Field(None, ge=0)
     service_agreement: Optional[str] = None
+    geo: Optional[dict] = None
+    location_public: str = Field("approximate", pattern=r"^(approximate|exact|hidden)$")
     force: bool = False
 
 
@@ -136,10 +160,16 @@ async def create_prop(body: PropertyIn, user=Depends(require("properties", "w"))
                 raise HTTPException(409, f"Possible duplicate of property {d['code']}")
     if is_scoped(user, "properties"):
         data["assigned_agent"] = user["id"]
-    if not data.get("branch_id") and user.get("branch_ids"):
-        data["branch_id"] = user["branch_ids"][0]
-    if not data.get("branch_id"):
-        data["branch_id"] = {"erode": "br-erode", "perundurai": "br-perundurai"}.get(body.city.strip().lower())
+    if data.get("branch_id"):
+        check_branch(user, data["branch_id"])
+    else:
+        # the branch that covers the town, unless that is outside the person's own branches
+        place = await branch_for_place(body.city, body.locality)
+        data["branch_id"] = place if in_branch(user, place) else home_branch(user) or place
+    from routes_branches import ensure_place
+    data.update(geo_fields(data.pop("geo", None), data.get("location_public"), user))
+    await ensure_place(body.city.strip(), body.locality.strip(), body.pincode,
+                       (data.get("geo") or {}).get("lat"), (data.get("geo") or {}).get("lng"), data["branch_id"], user["id"])
     p = {"id": new_id(), "code": await next_code("property", "SE-P-"), **data, "status": "draft",
          "verification": {"status": "not_started"}, "authorization": {}, "publication_history": [],
          "featured": False, "listing_id": None, "created_by": user["id"], "created_at": now_iso(),
@@ -173,6 +203,20 @@ async def update_prop(pid: str, body: dict, user=Depends(require("properties", "
     for k in ("price", "plot_area", "built_area", "mgmt_fee_pct", "nightly_rate"):
         if upd.get(k) not in (None, "") and float(upd[k]) < 0:
             raise HTTPException(422, f"{k} cannot be negative")
+    if upd.get("branch_id"):
+        check_branch(user, upd["branch_id"])
+    if "geo" in upd or "location_public" in upd:
+        geo = upd.pop("geo", None) or p.get("geo")
+        mode = upd.get("location_public") or p.get("location_public") or "approximate"
+        g = geo_fields(geo, mode, user, (geo or {}).get("source") or "pin")
+        if g:
+            upd.update(g)
+        elif mode == "hidden":
+            upd.update({"public_lat": None, "public_lng": None})
+    if upd.get("city") or upd.get("locality"):
+        from routes_branches import ensure_place
+        await ensure_place(upd.get("city") or p.get("city"), upd.get("locality") or p.get("locality"),
+                           upd.get("pincode") or p.get("pincode"), branch_id=p.get("branch_id"), source=user["id"])
     upd["updated_at"] = now_iso()
     await db.properties.update_one({"id": pid}, {"$set": upd})
     await audit(user, "property_updated", "properties", pid, {k: v for k, v in upd.items() if k != "updated_at"})
@@ -262,6 +306,11 @@ async def create_owner(body: OwnerIn, user=Depends(require("owners", "w"))):
         raise HTTPException(409, "An owner with this phone already exists")
     o = {"id": new_id(), "code": await next_code("owner", "SE-O-"), **data, "created_at": now_iso(), "deleted": False}
     await db.owners.insert_one(dict(o))
+    from routes_customers import link_customer
+    c = await link_customer("owners", o["id"], {"name": o["name"], "phone": o["phone"], "email": o.get("email"),
+                                                "types": ["owner", "landlord"], "source": "direct", "address": o.get("address"),
+                                                "kind": "business" if o.get("kind") == "company" else "individual"}, user)
+    o["customer_id"] = c and c["id"]
     await audit(user, "owner_created", "owners", o["id"])
     return o
 
