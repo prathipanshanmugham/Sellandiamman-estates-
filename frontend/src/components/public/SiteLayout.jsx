@@ -1,14 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Menu, X, Phone, Mail, MapPin, MessageCircle, Heart, Facebook, Instagram, Youtube, Linkedin, Globe } from "lucide-react";
-import { api, store, waLink, useShortlist, telLink } from "../../lib/api";
-import { SERVICES } from "../../lib/content";
+import { Menu, X, Phone, Mail, MapPin, MessageCircle, Heart, Facebook, Instagram, Youtube, Linkedin, Globe, Eye } from "lucide-react";
+import { api, store, waLink, useShortlist, telLink, cachedGet, placeUrl } from "../../lib/api";
+import { DEFAULT_SITE } from "../../lib/content";
 import { Logo } from "../brand/Logo";
 
-const SiteCtx = createContext({});
+const SiteCtx = createContext({ content: DEFAULT_SITE, branches: [] });
 export const useSite = () => useContext(SiteCtx);
 
-const NAV = [["/properties", "Properties"], ["/services", "Services"], ["/tools", "Tools"], ["/insights", "Insights"], ["/list-property", "List your property"], ["/contact", "Contact"]];
+const NAV = [["/properties", "Properties"], ["/services", "Services"], ["/insights", "Insights"], ["/list-property", "List your property"], ["/contact", "Contact"]];
 
 // Kept for older imports: the brand lockup, or an uploaded logo when an administrator has set one.
 export function Wordmark({ dark = false, logo, size = "md" }) {
@@ -59,23 +59,26 @@ function Footer({ site }) {
       <div className="container-x grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <Wordmark dark />
-          <p className="mt-5 text-sm text-slate-400">A Sellandiamman Group company. Brokerage, property management and short-stay services in Erode and Perundurai.</p>
+          <p className="mt-5 text-sm text-slate-400">{site.content.footer_tagline}</p>
           {site.rera_no && <p className="mt-3 text-xs text-slate-500" data-testid="footer-rera">TNRERA agent registration: {site.rera_no}</p>}
           {social.length > 0 && <div className="mt-5 flex gap-2">{social.map(([k, url]) => { const I = SOCIAL[k] || Globe; return <a key={k} href={url} target="_blank" rel="noopener noreferrer" aria-label={k.replace("_", " ")} className="border border-slate-700 p-2 text-slate-400 hover:border-slate-500 hover:text-white"><I size={16} /></a>; })}</div>}
         </div>
         <div>
           <p className="eyebrow !text-slate-500">Services</p>
-          <ul className="mt-4 space-y-2 text-sm">{SERVICES.slice(0, 6).map((s) => <li key={s.slug}><Link className="hover:text-white" to={`/services/${s.slug}`}>{s.title}</Link></li>)}</ul>
+          <ul className="mt-4 space-y-2 text-sm">{site.content.services.slice(0, 7).map((s) => <li key={s.slug}><Link className="hover:text-white" to={`/services/${s.slug}`}>{s.title}</Link></li>)}</ul>
+          {site.branches.length > 0 && <><p className="eyebrow mt-8 !text-slate-500">Properties by town</p>
+            <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm" data-testid="footer-towns">{site.branches.map((b) => <li key={b.id}><Link className="hover:text-white" to={placeUrl(b.city)}>{b.city}</Link></li>)}</ul></>}
         </div>
         <div>
           <p className="eyebrow !text-slate-500">Company</p>
           <ul className="mt-4 space-y-2 text-sm">
-            {[["/about", "About us"], ["/tools", "Property calculators"], ["/insights", "Insights & guides"], ["/requirement", "Post your requirement"], ["/faq", "FAQ"], ["/legal/privacy", "Privacy policy"], ["/legal/terms", "Terms of service"], ["/legal/disclaimer", "Listing disclaimer"], ["/legal/cookies", "Cookie policy"]].map(([to, l]) => <li key={to}><Link className="hover:text-white" to={to}>{l}</Link></li>)}
+            {[["/about", "About us"], ["/insights", "Insights & guides"], ["/requirement", "Post your requirement"], ["/faq", "FAQ"], ["/legal/privacy", "Privacy policy"], ["/legal/terms", "Terms of service"], ["/legal/disclaimer", "Listing disclaimer"], ["/legal/cookies", "Cookie policy"]].map(([to, l]) => <li key={to}><Link className="hover:text-white" to={to}>{l}</Link></li>)}
           </ul>
         </div>
         <div className="space-y-3 text-sm" data-testid="footer-contact">
           <p className="eyebrow !text-slate-500">Contact</p>
           {site.address && <p className="flex gap-2"><MapPin size={16} className="mt-0.5 shrink-0" />{site.address}</p>}
+          {site.branches.length > 1 && <p className="text-xs text-slate-400">Branches: {site.branches.map((b) => b.name).join(" · ")}. <Link to="/contact" className="underline">Addresses</Link></p>}
           {site.phone && <a href={telLink(site.phone)} className="flex gap-2 hover:text-white"><Phone size={16} className="shrink-0" />{site.phone}</a>}
           {site.email && <a href={`mailto:${site.email}`} className="flex gap-2 break-all hover:text-white"><Mail size={16} className="shrink-0" />{site.email}</a>}
           {site.office_hours && <p className="text-slate-500">{site.office_hours}</p>}
@@ -114,15 +117,43 @@ function ScrollToTop() {
   return null;
 }
 
+// Staff can look at unpublished website-editor changes by opening any page with ?preview=draft
+const ss = { get: (k) => { try { return sessionStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { if (v) sessionStorage.setItem(k, v); else sessionStorage.removeItem(k); } catch { /* storage off */ } } };
+function usePreviewDraft() {
+  const { search } = useLocation();
+  const asked = new URLSearchParams(search).get("preview") === "draft";
+  if (asked) ss.set("se_preview", "1");
+  const [on, setOn] = useState(asked || ss.get("se_preview") === "1");
+  const [draft, setDraft] = useState(null);
+  useEffect(() => { if (asked) setOn(true); }, [asked]);
+  useEffect(() => {
+    if (!on) { setDraft(null); return; }
+    api.get("/cms/site").then((r) => setDraft(r.data.draft)).catch(() => setDraft(false));
+  }, [on, search]);
+  const exit = () => { ss.set("se_preview", ""); setOn(false); };
+  return [on ? draft : null, exit];
+}
+
 export default function SiteLayout() {
-  const [site, setSite] = useState({});
-  useEffect(() => { api.get("/public/settings").then((r) => setSite(r.data)).catch(() => {}); }, []);
+  const [settings, setSettings] = useState({});
+  const [content, setContent] = useState(DEFAULT_SITE);
+  const [branches, setBranches] = useState([]);
+  const [draft, exitPreview] = usePreviewDraft();
+  useEffect(() => {
+    cachedGet("/public/settings").then(setSettings).catch(() => {});
+    cachedGet("/public/site").then(setContent).catch(() => {});
+    cachedGet("/public/branches").then(setBranches).catch(() => {});
+  }, []);
+  const c = draft || content;
+  const site = { ...settings, content: c, branches, announcement: c.announcement, testimonials: c.testimonials, preview: !!draft };
   const wa = waLink(site.whatsapp, "Hello Sellandiamman Estates, I have an enquiry.");
   return (
     <SiteCtx.Provider value={site}>
       <ScrollToTop />
       <div className="flex min-h-screen flex-col">
         <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-white focus:p-3">Skip to content</a>
+        {draft && <div className="flex items-center justify-center gap-2 bg-amber-100 px-4 py-2 text-center text-xs font-medium text-amber-900" data-testid="draft-preview-banner"><Eye size={14} />Previewing unpublished website changes. Visitors still see the published version. <Link to="/erp/website" className="underline">Back to the editor</Link><button className="underline" onClick={exitPreview}>Exit preview</button></div>}
+        {draft === false && <div className="bg-amber-100 px-4 py-2 text-center text-xs text-amber-900">Sign in as staff with website access to preview unpublished changes. <button className="underline" onClick={exitPreview}>Close</button></div>}
         {site.demo_mode && <div className="bg-brand-wash py-1.5 text-center text-xs text-slate-600" data-testid="demo-banner">Sample listings shown for demonstration. They are not real properties.</div>}
         {site.announcement && <div className="bg-slate-900 px-4 py-2 text-center text-xs font-medium text-white" data-testid="announcement-bar">{site.announcement}</div>}
         <Header site={site} />

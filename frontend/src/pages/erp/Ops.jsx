@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { api, fmtDate, fmtDateTime, inr, label, opts } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useDialog } from "../../lib/dialogs";
@@ -38,53 +38,6 @@ export function Maintenance() {
       </Modal>
       <FormDialog open={open === "wo"} onClose={() => setOpen("")} title="New work order" initial={{ priority: "medium", charge_to: "owner", category: "general" }} fields={[{ name: "property_id", label: "Property", type: "select", required: true, full: true, options: props.filter((p) => p.code).map((p) => ({ value: p.id, label: `${p.code} · ${p.title}` })) }, { name: "title", label: "Issue", required: true, full: true }, { name: "category", label: "Category", type: "select", required: true, options: opts(["general", "plumbing", "electrical", "carpentry", "painting", "cleaning", "appliance", "structural"]) }, { name: "priority", label: "Priority", type: "select", required: true, options: opts(["low", "medium", "high", "urgent"]) }, { name: "due_date", label: "Due date", type: "date" }, { name: "charge_to", label: "Charge to", type: "select", required: true, options: opts(["owner", "company"]) }, { name: "vendor_id", label: "Vendor", type: "select", options: vendors.map((v) => ({ value: v.id, label: v.name })) }, { name: "reported_by", label: "Reported by" }, { name: "description", label: "Description", type: "textarea", full: true }]} onSubmit={async (v) => { await api.post("/work-orders", v); reload(); }} />
       <FormDialog open={open === "vendor"} onClose={() => setOpen("")} title="New vendor" fields={[{ name: "name", label: "Name", required: true }, { name: "phone", label: "Mobile", required: true }, { name: "trade", label: "Trade", required: true }, { name: "gstin", label: "GSTIN" }, { name: "notes", label: "Notes", full: true }]} onSubmit={async (v) => { await api.post("/vendors", v); rv(); }} />
-    </div>
-  );
-}
-
-function preview(v) {
-  if (!v.check_in || !v.check_out || !v.nightly_rate) return null;
-  const n = Math.round((new Date(v.check_out) - new Date(v.check_in)) / 864e5);
-  if (n <= 0) return null;
-  const room = n * v.nightly_rate, gross = room - (+v.discount || 0) + (+v.cleaning_fee || 0), net = gross - (+v.platform_fee || 0), fee = (net * (+v.mgmt_fee_pct || 0)) / 100;
-  return { n, gross, net, fee, owner: net - fee - (+v.operating_costs || 0) };
-}
-
-export function ShortStay() {
-  const { can } = useAuth();
-  const dialog = useDialog();
-  const [open, setOpen] = useState(false);
-  const [cancel, setCancel] = useState(null);
-  const [sel, setSel] = useState(null);
-  const { rows, reload } = useList("/bookings");
-  const { rows: allProps } = useList(can("properties") ? "/properties" : "/branches", can("properties") ? { transaction: "short_stay" } : undefined);
-  const props = allProps.filter((p) => p.code);
-  const w = can("shortstay", "w");
-  const occ = useMemo(() => { const live = rows.filter((b) => b.status !== "cancelled"); const nights = live.reduce((s, b) => s + b.nights, 0); return { nights, adr: nights ? live.reduce((s, b) => s + b.room_revenue, 0) / nights : 0, fees: live.reduce((s, b) => s + b.management_fee, 0) }; }, [rows]);
-  const doAct = async (fn, msg) => { const r = await act(fn, msg); if (r) { reload(); setSel(null); } };
-  return (
-    <div>
-      <PageHeader title="Short-stay" sub={`Manual booking entry. No live platform sync is configured. ${occ.nights} nights booked · ADR ${inr(occ.adr, true)} · fees ${inr(occ.fees, true)}`}>{w && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-booking-btn">New reservation</button>}</PageHeader>
-      <DataTable testid="bookings-table" rows={rows} onRow={setSel} columns={[{ key: "code", label: "Code" }, { key: "property_title", label: "Property" }, { key: "guest_name", label: "Guest" }, { key: "check_in", label: "Check-in", render: (r) => fmtDate(r.check_in) }, { key: "check_out", label: "Check-out", render: (r) => fmtDate(r.check_out) }, { key: "gross", label: "Gross", render: (r) => inr(r.gross) }, { key: "management_fee", label: "Our fee", render: (r) => inr(r.management_fee) }, { key: "owner_payout", label: "Owner", render: (r) => inr(r.owner_payout) }, { key: "status", label: "Status", render: (r) => <><Badge v={r.status} />{r.settled && <Badge v="settled" />}</> }]} />
-      <Modal open={!!sel} onClose={() => setSel(null)} title={`Booking ${sel?.code}`} wide>
-        {sel && <div className="space-y-4" data-testid="booking-detail">
-          <Facts items={[["Guest", `${sel.guest_name} (${sel.guests})`], ["Phone", sel.guest_phone], ["Platform", label(sel.platform)], ["Nights", sel.nights], ["Room revenue", inr(sel.room_revenue)], ["Gross booking", inr(sel.gross)], ["Platform fee", inr(sel.platform_fee)], ["Net after platform", inr(sel.net_after_platform)], [`Management fee (${sel.mgmt_fee_pct}%)`, <b data-testid="booking-mgmt-fee">{inr(sel.management_fee)}</b>], ["Operating costs", inr(sel.operating_costs)], ["Owner settlement", <b data-testid="booking-owner-payout">{inr(sel.owner_payout)}</b>], ["Status", label(sel.status)]]} />
-          {w && <div className="flex flex-wrap gap-2">
-            {sel.status === "confirmed" && <button className="btn-line btn-sm" onClick={() => doAct(() => api.patch(`/bookings/${sel.id}/status`, { status: "checked_in" }), "Checked in")} data-testid="checkin-btn">Check in</button>}
-            {sel.status === "checked_in" && <button className="btn-line btn-sm" onClick={() => doAct(() => api.patch(`/bookings/${sel.id}/status`, { status: "completed" }), "Checked out")} data-testid="checkout-btn">Check out</button>}
-            {sel.status === "completed" && !sel.settled && <button className="btn-dark btn-sm" onClick={() => doAct(() => api.post(`/bookings/${sel.id}/settle`), "Settlement posted")} data-testid="settle-booking-btn">Post owner settlement</button>}
-            {sel.status === "confirmed" && <button className="btn-line btn-sm" onClick={() => setCancel(sel)} data-testid="cancel-booking-btn">Cancel</button>}
-            <button className="btn-line btn-sm" onClick={async () => { const note = await dialog.ask({ title: "Log a guest issue", label: "What happened?", type: "textarea" }); if (note) doAct(() => api.post(`/bookings/${sel.id}/issues`, { note }), "Issue logged"); }}>Log guest issue</button>
-          </div>}
-          {sel.issues?.map((i, k) => <p key={k} className="text-xs text-slate-600">{fmtDateTime(i.at)} · {i.by}: {i.note}</p>)}
-        </div>}
-      </Modal>
-      <FormDialog open={!!cancel} onClose={() => setCancel(null)} title={`Cancel booking ${cancel?.code || ""}`} submitLabel="Cancel booking" initial={{ refund_amount: 0 }} fields={[{ name: "reason", label: "Reason", required: true, full: true }, { name: "refund_amount", label: "Refund to guest (₹)", type: "number", required: true, hint: "Refunds may need a director's approval." }]}
-        onSubmit={async (v) => { const r = await api.post(`/bookings/${cancel.id}/cancel`, { reason: v.reason, refund_amount: v.refund_amount || 0 }); act(async () => r, r.data.approval_required ? "Refund sent for approval" : "Booking cancelled"); reload(); setSel(null); }} />
-      <FormDialog open={open} onClose={() => setOpen(false)} title="New reservation" initial={{ guests: 2, platform: "direct", discount: 0, cleaning_fee: 0, platform_fee: 0, operating_costs: 0 }} fields={[{ name: "property_id", label: "Property", type: "select", required: true, full: true, options: props.map((p) => ({ value: p.id, label: `${p.code} · ${p.title}` })) }, { name: "guest_name", label: "Guest name", required: true }, { name: "guest_phone", label: "Guest mobile", required: true }, { name: "guests", label: "Guests", type: "number", required: true }, { name: "platform", label: "Platform", type: "select", required: true, options: opts(["direct", "airbnb", "booking_com", "makemytrip", "other"]) }, { name: "check_in", label: "Check-in", type: "date", required: true }, { name: "check_out", label: "Check-out", type: "date", required: true }, { name: "nightly_rate", label: "Nightly rate (₹)", type: "number", required: true }, { name: "discount", label: "Discount (₹)", type: "number" }, { name: "cleaning_fee", label: "Cleaning fee (₹)", type: "number" }, { name: "platform_fee", label: "Platform fee (₹)", type: "number" }, { name: "operating_costs", label: "Operating costs (₹)", type: "number" }, { name: "mgmt_fee_pct", label: "Mgmt fee % (blank = property default)", type: "number" }]}
-        onSubmit={async (v) => { await api.post("/bookings", v); reload(); }}>
-        {(v) => { const p = preview({ ...v, mgmt_fee_pct: v.mgmt_fee_pct ?? props.find((x) => x.id === v.property_id)?.mgmt_fee_pct }); return p && <p className="bg-slate-50 p-3 text-sm" data-testid="booking-preview">{p.n} nights · gross {inr(p.gross)} · net {inr(p.net)} · fee {inr(p.fee)} · owner {inr(p.owner)}</p>; }}
-      </FormDialog>
     </div>
   );
 }

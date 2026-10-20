@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, label, opts, priceLabel } from "../../lib/api";
+import { api, label, opts, priceLabel, useCached } from "../../lib/api";
+import LocationPicker from "../../components/LocationPicker";
 import { useAuth } from "../../lib/auth";
 import { useDialog } from "../../lib/dialogs";
 import { PageHeader, DataTable, Badge, FormDialog, useList } from "../../components/erp/kit";
@@ -16,7 +17,7 @@ export const propFields = (owners, users, branches) => [
   { name: "service_type", label: "Service", type: "select", required: true, options: opts(["brokerage", "management", "short_stay"]) },
   { name: "owner_id", label: "Owner", type: "select", options: owners.map((o) => ({ value: o.id, label: `${o.code} · ${o.name}` })) },
   { name: "branch_id", label: "Branch", type: "select", options: branches.map((b) => ({ value: b.id, label: b.name })) },
-  { name: "city", label: "City", required: true }, { name: "locality", label: "Locality", required: true }, { name: "pincode", label: "PIN code" },
+  { name: "location_public", label: "Pin on the website", type: "select", required: true, options: [{ value: "approximate", label: "Approximate (about 100 m away)" }, { value: "exact", label: "Exact point" }, { value: "hidden", label: "Do not show a pin" }] },
   { name: "survey_no", label: "Survey no. / identifier" }, { name: "internal_address", label: "Full address (internal)", full: true },
   { name: "price", label: "Price / rent (₹)", type: "number" }, { name: "price_unit", label: "Price unit", type: "select", required: true, options: opts(["total", "per_month", "per_night", "per_sqft", "per_acre", "per_cent"]) },
   { name: "plot_area", label: "Plot area", type: "number" }, { name: "built_area", label: "Built-up area", type: "number" },
@@ -36,9 +37,25 @@ export const propFields = (owners, users, branches) => [
 ];
 
 export const toPropBody = (v) => {
-  const { amenities_text, images_text, ...rest } = v;
-  return { ...rest, amenities: (amenities_text || "").split(",").map((s) => s.trim()).filter(Boolean), images: (images_text || "").split(",").map((s) => s.trim()).filter(Boolean) };
+  const { amenities_text, images_text, lat, lng, accuracy_m, source, ...rest } = v;
+  const out = { ...rest, amenities: (amenities_text || "").split(",").map((s) => s.trim()).filter(Boolean), images: (images_text || "").split(",").map((s) => s.trim()).filter(Boolean) };
+  ["verifications", "owner", "leases", "public_lat", "public_lng"].forEach((k) => delete out[k]);
+  if (lat && lng) out.geo = { lat, lng, accuracy_m, source: source || "map_pin" };
+  else if ("lat" in v) out.geo = null;
+  return out;
 };
+// geo (private exact point) -> the picker's flat fields
+export const geoInitial = (p) => ({ lat: p.geo?.lat ?? null, lng: p.geo?.lng ?? null, accuracy_m: p.geo?.accuracy_m ?? null, source: p.geo?.source ?? null });
+
+// The town / locality / map pin block used inside the property forms
+export function PropLocation({ v, set }) {
+  const towns = useCached("/locations", []);
+  return (
+    <fieldset className="border-t border-slate-100 pt-4"><legend className="lbl">Location</legend>
+      <LocationPicker value={v} onChange={(x) => set(x)} towns={towns} testid="prop-location" note="Add a new town or locality by typing it; it joins the list for everyone. The exact pin stays internal; the website shows the point you choose above." />
+    </fieldset>
+  );
+}
 
 export default function Properties() {
   const nav = useNavigate();
@@ -63,15 +80,15 @@ export default function Properties() {
       <DataTable testid="properties-table" rows={rows} onRow={(r) => nav(`/erp/properties/${r.id}`)} columns={[
         { key: "code", label: "Code" }, { key: "listing_id", label: "Listing" }, { key: "title", label: "Title" },
         { key: "category", label: "Type", render: (r) => `${label(r.category)} · ${label(r.transaction)}` },
-        { key: "locality", label: "Location", render: (r) => `${r.locality}, ${r.city}` }, { key: "price", label: "Price", render: (r) => priceLabel(r) },
+        { key: "locality", label: "Location", render: (r) => `${r.locality}, ${r.city}` }, { key: "branch_id", label: "Branch", render: (r) => branches.find((b) => b.id === r.branch_id)?.name || "-" }, { key: "price", label: "Price", render: (r) => priceLabel(r) },
         { key: "ownership_type", label: "Ownership", render: (r) => label(r.ownership_type) },
         { key: "status", label: "Status", render: (r) => <Badge v={r.status} /> },
       ]} />
-      <FormDialog open={open} onClose={() => setOpen(false)} title="New property" fields={propFields(can("owners") ? owners : [], users, branches)} initial={{ transaction: "sale", category: "residential", ownership_type: "third_party", service_type: "brokerage", price_unit: "total", area_unit: "sq.ft", city: "Erode" }}
+      <FormDialog open={open} onClose={() => setOpen(false)} title="New property" wide fields={propFields(can("owners") ? owners : [], users, branches)} initial={{ transaction: "sale", category: "residential", ownership_type: "third_party", service_type: "brokerage", price_unit: "total", area_unit: "sq.ft", city: "", locality: "", location_public: "approximate" }}
         onSubmit={async (v) => {
           try { const r = await api.post("/properties", toPropBody(v)); nav(`/erp/properties/${r.data.id}`); }
           catch (e) { if (e.response?.status === 409 && await dialog.confirm({ title: "Possible duplicate", body: `${e.response.data.detail}. Create a separate property anyway?`, okLabel: "Create anyway" })) { const r = await api.post("/properties", { ...toPropBody(v), force: true }); nav(`/erp/properties/${r.data.id}`); } else throw e; }
-        }} />
+        }}>{(v, set) => <PropLocation v={v} set={set} />}</FormDialog>
     </div>
   );
 }

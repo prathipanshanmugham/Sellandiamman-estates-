@@ -238,7 +238,7 @@ def metrics(cur, prev, comp, targets_month=None, days=30):
     add("occupancy", "portfolio", "Managed rentals occupied", pct(cur["occupied"], cur["managed"]), "%", 60, 95, "95% or more",
         "List vacant managed homes first on the website and portals; review their rent.", "/erp/properties", f"{cur['occupied']} of {cur['managed']}")
     add("ss_occupancy", "portfolio", "Short-stay nights booked", pct(cur["ss_nights"], cur["ss_available"]), "%", 20, 70, "70% or more",
-        "Check each unit's platforms and prices in Short-stay → Units; add missing platforms.", "/erp/short-stay",
+        "Check each home's platforms and prices in Short stays → Homes & platforms; add missing platforms.", "/erp/short-stay",
         f"{cur['ss_nights']} of {cur['ss_available']} nights")
     add("fresh_listings", "portfolio", "Listings fresher than 90 days", pct(cur["published"] - cur["stale"], cur["published"]), "%", 50, 90,
         "90% or more", "Re-price or re-shoot listings older than 90 days.", "/erp/properties", f"{cur['stale']} older than 90 days")

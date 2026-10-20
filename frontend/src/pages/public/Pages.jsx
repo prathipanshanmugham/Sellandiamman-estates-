@@ -1,12 +1,16 @@
 import { Link, useParams } from "react-router-dom";
 import { ArrowRight, Check } from "lucide-react";
-import { useTitle, useMeta, asset, telLink } from "../../lib/api";
-import { SERVICES, FAQ, LEGAL } from "../../lib/content";
+import { useTitle, useMeta, imgSrc, telLink, SITE_URL } from "../../lib/api";
+import { LEGAL } from "../../lib/content";
+import { Markdown } from "../../lib/markdown";
 import EnquiryForm from "../../components/public/EnquiryForm";
+import PropertyMap from "../../components/public/PropertyMap";
 import { useSite } from "../../components/public/SiteLayout";
+import { BranchCards } from "./Home";
 
 export function Services() {
-  useTitle("Services", "Brokerage, rental, property management, NRI, short-stay and commercial leasing services.");
+  const SERVICES = useSite().content.services;
+  useTitle("Services", "Brokerage, rentals, property management, NRI services, short stays, commercial leasing and co-investment.");
   return (
     <div className="container-x py-14">
       <p className="eyebrow">Services</p>
@@ -20,10 +24,10 @@ export function Services() {
 
 export function ServiceDetail() {
   const { slug } = useParams();
-  const s = SERVICES.find((x) => x.slug === slug);
-  useTitle(s?.title, s?.summary);
+  const s = useSite().content.services.find((x) => x.slug === slug);
+  useMeta({ title: s?.title, description: s?.summary, jsonLd: s && { "@context": "https://schema.org", "@type": "Service", name: s.title, description: s.summary, provider: { "@id": `${SITE_URL}/#org` } } });
   if (!s) return <div className="container-x py-24">Service not found.</div>;
-  const interest = { "property-management": "management", "nri-services": "management", "short-stay": "management", "commercial-industrial": "lease", "rental-brokerage": "rent", "buy-sell": "buy" }[slug] || "other";
+  const interest = { "property-management": "management", "nri-services": "management", "short-stay": "management", "commercial-industrial": "lease", "rental-brokerage": "rent", "buy-sell": "buy", investment: "other" }[slug] || "other";
   return (
     <div className="container-x grid gap-14 py-14 lg:grid-cols-[1.4fr_1fr]" data-testid={`service-page-${slug}`}>
       <div>
@@ -39,25 +43,31 @@ export function ServiceDetail() {
 }
 
 export function About() {
-  useTitle("About us");
+  const site = useSite();
+  const a = site.content.about;
+  useTitle("About us", a.body.slice(0, 160));
   return (
     <div>
       <section className="container-x grid gap-12 py-16 lg:grid-cols-2">
-        <div><p className="eyebrow">About</p><h1 className="mt-2 font-heading text-4xl font-semibold sm:text-5xl">Sellandiamman Estates</h1>
-          <p className="mt-6 text-base leading-relaxed text-slate-600">Sellandiamman Estates is the real estate services arm of the Sellandiamman Group. We help owners sell, rent, lease and manage their properties, and help buyers, tenants and businesses find the right space in Erode and Perundurai.</p>
-          <p className="mt-4 text-base leading-relaxed text-slate-600">We work on an asset-light model: we do not buy land or build. Our role is to represent owners and clients with clear written terms, verified listings and transparent reporting.</p></div>
-        <img src={asset("/images/estate.jpg")} alt="Residential property" className="aspect-[4/3] w-full object-cover" />
+        <div><p className="eyebrow">About</p><h1 className="mt-2 font-heading text-4xl font-semibold sm:text-5xl">{a.title}</h1>
+          <div className="mt-6"><Markdown text={a.body} className="prose-article !text-base" /></div></div>
+        <img src={imgSrc(a.image)} alt="" className="aspect-[4/3] w-full object-cover" />
       </section>
+      {site.branches.length > 0 && <section className="container-x pb-16"><h2 className="mb-6 font-heading text-2xl font-semibold">Where we work</h2><BranchCards branches={site.branches} phone={site.phone} whatsapp={site.whatsapp} /></section>}
     </div>
   );
 }
 
 export function Contact() {
   const site = useSite();
-  useTitle("Contact us", "Contact Sellandiamman Estates in Erode and Perundurai.");
+  const towns = site.branches.map((b) => b.name).join(", ");
+  useTitle("Contact us", `Branches in ${towns || "Perundurai, Erode, Kadambur, Sathyamangalam and Namakkal"}. ${site.content.contact_intro || ""}`);
+  const pins = site.branches.filter((b) => b.lat && b.lng).map((b) => ({ listing_id: b.id, title: b.name, public_lat: b.lat, public_lng: b.lng, price_on_request: true, pin: b.name }));
   return (
     <div className="container-x py-14">
       <p className="eyebrow">Contact</p><h1 className="mt-2 font-heading text-4xl font-semibold">Speak with our team</h1>
+      {site.content.contact_intro && <p className="mt-3 max-w-2xl text-slate-600">{site.content.contact_intro}</p>}
+      {site.branches.length > 0 && <div className="mt-10 grid gap-6 lg:grid-cols-[1.4fr_1fr]" data-testid="contact-branches"><BranchCards branches={site.branches} phone={site.phone} whatsapp={site.whatsapp} compact />{pins.length > 0 && <PropertyMap items={pins} height={360} />}</div>}
       <div className="mt-10 grid gap-10 lg:grid-cols-3">
         <div className="space-y-4 text-sm text-slate-700" data-testid="contact-details"><p><span className="eyebrow block">Office</span>{site.address}</p><p><span className="eyebrow block">Phone</span><a href={telLink(site.phone)} className="hover:underline">{site.phone}</a></p><p><span className="eyebrow block">Email</span><a href={`mailto:${site.email}`} className="break-all hover:underline">{site.email}</a></p><p><span className="eyebrow block">Hours</span>{site.office_hours}</p><p className="border-t border-slate-200 pt-4"><span className="eyebrow block">Looking for something specific?</span><Link to="/requirement" className="font-medium underline">Post your requirement</Link> and we will match it with new listings.</p></div>
         <div className="border border-slate-200 p-6"><EnquiryForm kind="callback" title="Request a callback" testid="callback" /></div>
@@ -68,10 +78,11 @@ export function Contact() {
 }
 
 export function Faq() {
-  useTitle("Frequently asked questions");
+  const FAQ = useSite().content.faq;
+  useMeta({ title: "Frequently asked questions", description: "Answers about listings, brokerage, verification, NRI services, short stays and investing.", jsonLd: { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: FAQ.map((x) => ({ "@type": "Question", name: x.q, acceptedAnswer: { "@type": "Answer", text: x.a } })) } });
   return (
     <div className="container-x max-w-3xl py-14"><p className="eyebrow">FAQ</p><h1 className="mt-2 font-heading text-4xl font-semibold">Frequently asked questions</h1>
-      <div className="mt-10 divide-y divide-slate-200 border-y border-slate-200">{FAQ.map(([q, a], i) => <details key={q} className="group py-5" data-testid={`faq-item-${i}`}><summary className="cursor-pointer list-none font-medium text-slate-900">{q}</summary><p className="mt-3 text-sm text-slate-600">{a}</p></details>)}</div>
+      <div className="mt-10 divide-y divide-slate-200 border-y border-slate-200">{FAQ.map(({ q, a }, i) => <details key={q} className="group py-5" data-testid={`faq-item-${i}`}><summary className="cursor-pointer list-none font-medium text-slate-900">{q}</summary><p className="mt-3 text-sm text-slate-600">{a}</p></details>)}</div>
     </div>
   );
 }
@@ -89,7 +100,7 @@ export function Legal() {
 }
 
 export function Requirement() {
-  useMeta({ title: "Post your requirement", description: "Tell us the home, plot, shop, office or factory shed you need in Erode or Perundurai. We match it with verified listings.", path: "/requirement" });
+  useMeta({ title: "Post your requirement", description: "Tell us the home, plot, shop, office or factory shed you need in Perundurai, Erode, Kadambur, Sathyamangalam or Namakkal. We match it with verified listings.", path: "/requirement" });
   return (
     <div className="container-x grid gap-14 py-14 lg:grid-cols-[1fr_1.3fr]" data-testid="requirement-page">
       <div>

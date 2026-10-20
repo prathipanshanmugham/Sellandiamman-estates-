@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2 } from "lucide-react";
-import { api, errMsg, useTitle } from "../../lib/api";
+import { api, errMsg, useTitle, useCached } from "../../lib/api";
 import { useSite } from "../../components/public/SiteLayout";
 import Turnstile from "../../components/public/Turnstile";
+import LocationPicker from "../../components/LocationPicker";
 
 const SERVICES = ["Sale brokerage", "Rental brokerage", "Property management", "Short-stay management", "Marketing & photography", "Inspection & maintenance"];
 
 export default function ListProperty() {
   useTitle("List your property", "Submit your property to Sellandiamman Estates for verification and marketing.");
-  const [f, setF] = useState({ name: "", phone: "", email: "", preferred_contact: "phone", city: "Erode", locality: "", pincode: "", address: "", category: "residential", transaction: "sale", price: "", description: "", declaration: false, website: "" });
+  const [f, setF] = useState({ name: "", phone: "", email: "", preferred_contact: "phone", city: "", locality: "", pincode: "", address: "", category: "residential", transaction: "sale", price: "", description: "", declaration: false, website: "" });
+  const [where, setWhere] = useState({ city: "", locality: "", pincode: "" });
+  const towns = useCached("/public/locations", []);
   const [services, setServices] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [st, setSt] = useState({ loading: false, error: "", ref: "" });
@@ -19,13 +22,16 @@ export default function ListProperty() {
   const submit = async (e) => {
     e.preventDefault();
     if (photos.length > 6) return setSt({ ...st, error: "Up to 6 photos allowed" });
-    if (f.name.trim().length < 2 || !f.locality.trim()) return setSt({ ...st, error: "Please enter your name and the property's locality." });
+    if (f.name.trim().length < 2) return setSt({ ...st, error: "Please enter your name." });
+    if (!where.city?.trim() || !where.locality?.trim()) return setSt({ ...st, error: "Please choose the town and enter the property's locality." });
+    if (where.pincode && !/^\d{6}$/.test(where.pincode)) return setSt({ ...st, error: "PIN code must be 6 digits." });
     if (!/^(\+?91)?[6-9]\d{9}$/.test(f.phone.replace(/[\s\-()]/g, ""))) return setSt({ ...st, error: "Enter a valid 10-digit Indian mobile number." });
     if (!f.declaration) return setSt({ ...st, error: "Please confirm you are the owner or authorised by the owner." });
     if (site.turnstile_site_key && !token) return setSt({ ...st, error: "Please complete the 'I am human' check." });
     setSt({ loading: true, error: "", ref: "" });
     const fd = new FormData();
-    Object.entries(f).forEach(([k, v]) => { if (v !== "" && v !== null) fd.append(k, v); });
+    Object.entries({ ...f, city: where.city.trim(), locality: where.locality.trim(), pincode: where.pincode }).forEach(([k, v]) => { if (v !== "" && v !== null) fd.append(k, v); });
+    if (where.lat && where.lng) { fd.append("lat", where.lat); fd.append("lng", where.lng); if (where.accuracy_m) fd.append("accuracy_m", where.accuracy_m); fd.append("location_source", where.source || "map_pin"); }
     fd.append("services", services.join(", "));
     if (token) fd.append("cf_token", token);
     photos.forEach((p) => fd.append("photos", p));
@@ -45,7 +51,9 @@ export default function ListProperty() {
         <input type="text" className="hidden" tabIndex={-1} value={f.website} onChange={set("website")} aria-hidden="true" />
         <div className="grid gap-4 sm:grid-cols-2">{inp("name", "Owner name", { required: true })}{inp("phone", "Mobile number", { required: true, inputMode: "tel" })}{inp("email", "Email (optional)", { type: "email" })}
           <div><label className="lbl">Preferred contact</label><select className="inp" value={f.preferred_contact} onChange={set("preferred_contact")} data-testid="owner-contact-select"><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option></select></div></div>
-        <div className="grid gap-4 sm:grid-cols-3"><div><label className="lbl">City</label><select className="inp" value={f.city} onChange={set("city")} data-testid="owner-city-select"><option>Erode</option><option>Perundurai</option><option>Other</option></select></div>{inp("locality", "Locality", { required: true })}{inp("pincode", "PIN code", { maxLength: 6, inputMode: "numeric" })}</div>
+        <fieldset className="border-t border-slate-100 pt-4"><legend className="sr-only">Where is the property?</legend>
+          <LocationPicker value={where} onChange={setWhere} towns={towns} testid="owner-location" note="Optional but helpful: at the property, tap “Use my current location”. The website only ever shows an approximate point; the exact spot and address stay with our team." />
+        </fieldset>
         <div><label className="lbl">Full address (kept private)</label><textarea className="inp" rows={2} value={f.address} onChange={set("address")} data-testid="owner-address-input" /></div>
         <div className="grid gap-4 sm:grid-cols-3">
           <div><label className="lbl">Category</label><select className="inp" value={f.category} onChange={set("category")} data-testid="owner-category-select">{[["residential", "House / villa"], ["apartment", "Apartment"], ["land", "Plot / land"], ["agricultural", "Agricultural land"], ["commercial", "Commercial"], ["shop", "Shop / showroom"], ["office", "Office"], ["industrial", "Industrial plot"], ["factory_shed", "Factory shed"], ["warehouse", "Warehouse"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>

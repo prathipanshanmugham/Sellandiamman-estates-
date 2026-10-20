@@ -4,7 +4,8 @@ import { api, useMeta, fmtDate, imgSrc, label, shareUrl, SITE_URL } from "../../
 import { Markdown } from "../../lib/markdown";
 import ShareBar from "../../components/public/ShareBar";
 
-export const POST_CATEGORIES = ["market_update", "buying_guide", "owner_guide", "area_guide", "legal_tax", "company_news"];
+export const POST_CATEGORIES = ["market_update", "buying_guide", "owner_guide", "area_guide", "legal_tax", "company_news", "project_update"];
+const PUBLIC_CATEGORIES = POST_CATEGORIES.filter((c) => c !== "project_update");
 
 function PostCard({ p, big }) {
   return (
@@ -32,7 +33,7 @@ export function Insights() {
       <p className="mt-4 max-w-2xl text-slate-600">What we see in Erode and Perundurai: prices, rentals, documents to check and how owners can get more from their property.</p>
       <div className="-mx-4 mt-8 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
         <button className={`chip shrink-0 ${!cat ? "chip-on" : ""}`} onClick={() => setSp({})}>All</button>
-        {POST_CATEGORIES.map((c) => <button key={c} className={`chip shrink-0 ${cat === c ? "chip-on" : ""}`} onClick={() => setSp({ category: c })} data-testid={`post-cat-${c}`}>{label(c)}</button>)}
+        {PUBLIC_CATEGORIES.map((c) => <button key={c} className={`chip shrink-0 ${cat === c ? "chip-on" : ""}`} onClick={() => setSp({ category: c })} data-testid={`post-cat-${c}`}>{label(c)}</button>)}
       </div>
       {!d && <p className="mt-10 text-sm text-slate-500">Loading…</p>}
       {d && !d.items.length && <p className="mt-10 text-sm text-slate-500">No articles in this section yet.</p>}
@@ -48,7 +49,7 @@ export function Article() {
   useEffect(() => { setD(null); setErr(false); api.get(`/public/posts/${slug}`).then((r) => setD(r.data)).catch(() => setErr(true)); }, [slug]);
   const p = d?.post;
   useMeta({ title: p?.seo_title || p?.title || "Article", description: p?.seo_description || p?.excerpt, image: p?.cover_image, path: `/insights/${slug}`,
-    jsonLd: p && { "@context": "https://schema.org", "@type": "Article", headline: p.title, datePublished: p.published_at, dateModified: p.updated_at, author: { "@type": "Organization", name: "Sellandiamman Estates" }, publisher: { "@type": "Organization", name: "Sellandiamman Estates", logo: { "@type": "ImageObject", url: `${SITE_URL}/icon-512.png` } }, image: p.cover_image ? (p.cover_image.startsWith("http") ? p.cover_image : `${SITE_URL}${p.cover_image}`) : undefined } });
+    jsonLd: p && { "@context": "https://schema.org", "@type": "BlogPosting", headline: p.title, description: p.excerpt, datePublished: p.published_at, dateModified: p.updated_at, mainEntityOfPage: `${SITE_URL}/insights/${p.slug}`, keywords: (p.tags || []).join(", "), author: p.author_name ? { "@type": "Person", name: p.author_name } : { "@type": "Organization", name: "Sellandiamman Estates" }, publisher: { "@type": "Organization", name: "Sellandiamman Estates", logo: { "@type": "ImageObject", url: `${SITE_URL}/icon-512.png` } }, image: p.cover_image ? (p.cover_image.startsWith("http") ? p.cover_image : `${SITE_URL}${p.cover_image}`) : undefined } });
   if (err) return <div className="container-x py-24"><h1 className="font-heading text-2xl">Article not found</h1><Link to="/insights" className="btn-dark mt-6">All articles</Link></div>;
   if (!p) return <div className="container-x py-24 text-sm text-slate-500">Loading…</div>;
   return (
@@ -66,7 +67,7 @@ export function Article() {
         </div>
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
           <div className="border border-slate-200 p-5"><p className="font-heading font-semibold">Talk to us</p><p className="mt-1 text-sm text-slate-600">Questions about a property, documents or prices? We reply the same working day.</p><Link to="/contact" className="btn-dark mt-4 w-full">Contact the team</Link></div>
-          <div className="border border-slate-200 p-5"><p className="font-heading font-semibold">Run the numbers</p><p className="mt-1 text-sm text-slate-600">EMI, stamp duty and area conversion.</p><Link to="/tools" className="btn-line mt-4 w-full">Open calculators</Link></div>
+          <div className="border border-slate-200 p-5"><p className="font-heading font-semibold">Looking for a property?</p><p className="mt-1 text-sm text-slate-600">Tell us your budget and area; we send verified matches, including new listings before they go online.</p><Link to="/requirement" className="btn-line mt-4 w-full">Post your requirement</Link></div>
         </aside>
       </div>
       {d.related?.length > 0 && <section className="mt-16 border-t border-slate-200 pt-10"><h2 className="font-heading text-2xl font-semibold">More in {label(p.category)}</h2><div className="mt-6 grid gap-8 md:grid-cols-3">{d.related.map((r) => <PostCard key={r.slug} p={r} />)}</div></section>}

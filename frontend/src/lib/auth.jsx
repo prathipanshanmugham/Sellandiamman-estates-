@@ -48,7 +48,7 @@ export function AuthProvider({ children }) {
 }
 
 export const useAuth = () => useContext(AuthCtx);
-export const homeFor = (u) => (u?.role === "owner" ? "/owner" : "/erp");
+export const homeFor = (u) => (u?.role === "owner" ? "/owner" : u?.role === "investor" ? "/investor" : "/erp");
 
 function Checking() {
   return <div className="flex min-h-screen items-center justify-center p-10 text-sm text-slate-500" data-testid="auth-loading">Checking your session…</div>;
@@ -61,7 +61,7 @@ export function Protected({ children }) {
   if (user === null) return <Checking />;
   // After an expired session, come back to the same page; after signing out on purpose, start from the dashboard.
   if (!user) return <Navigate to="/erp/login" replace state={signedOut ? undefined : { from: loc.pathname }} />;
-  if (user.role === "owner") return <Navigate to="/owner" replace />;
+  if (user.role === "owner" || user.role === "investor") return <Navigate to={homeFor(user)} replace />;
   if (user.mfa_setup_required && loc.pathname !== "/erp/setup-2-step") return <Navigate to="/erp/setup-2-step" replace />;
   return children;
 }
@@ -71,7 +71,17 @@ export function OwnerOnly({ children }) {
   const loc = useLocation();
   if (user === null) return <Checking />;
   if (!user) return <Navigate to="/erp/login" replace state={signedOut ? undefined : { from: loc.pathname }} />;
-  if (user.role !== "owner") return <Navigate to="/erp" replace />;
+  if (user.role !== "owner") return <Navigate to={homeFor(user)} replace />;
+  return children;
+}
+
+export function InvestorOnly({ children }) {
+  const { user, signedOut } = useAuth();
+  const loc = useLocation();
+  if (user === null) return <Checking />;
+  if (!user) return <Navigate to="/erp/login" replace state={signedOut ? undefined : { from: loc.pathname }} />;
+  if (user.role !== "investor") return <Navigate to={homeFor(user)} replace />;
+  if (user.mfa_setup_required) return <Navigate to="/erp/setup-2-step" replace />;
   return children;
 }
 

@@ -25,7 +25,7 @@ export function Login() {
   const [mode, setMode] = useState("login"); // login | forgot | mfa
   const [mfa, setMfa] = useState({ token: "", code: "" });
   const [sent, setSent] = useState("");
-  const dest = (u) => (u?.role === "owner" ? "/owner" : loc.state?.from?.startsWith("/erp") ? loc.state.from : "/erp");
+  const dest = (u) => (u?.role === "owner" || u?.role === "investor" ? homeFor(u) : loc.state?.from?.startsWith("/erp") ? loc.state.from : "/erp");
   if (user) return <Navigate to={dest(user)} replace />;
   const submit = async (e) => {
     e.preventDefault(); setSt({ busy: true, err: "" });
@@ -55,7 +55,7 @@ export function Login() {
         {mode !== "mfa"
           ? <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => { setMode(mode === "forgot" ? "login" : "forgot"); setSent(""); setSt({ busy: false, err: "" }); }} data-testid="forgot-toggle">{mode === "forgot" ? "Back to sign in" : "Forgot password?"}</button>
           : <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => { setMode("login"); setSt({ busy: false, err: "" }); }}>Use a different account</button>}
-        <p className="text-xs text-slate-400">For staff and property owners. Accounts are created by our team; there is no public sign-up.</p>
+        <p className="text-xs text-slate-400">For staff, property owners and investors. Accounts are created by our team; there is no public sign-up.</p>
       </form>
     </Shell>
   );

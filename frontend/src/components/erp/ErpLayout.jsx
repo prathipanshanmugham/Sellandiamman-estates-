@@ -1,17 +1,35 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, LayoutDashboard, Users, Building2, UserSquare, Handshake, FileText, Wrench, CalendarDays, CalendarRange, Wallet, CheckSquare, FolderLock, BarChart3, Settings, ShieldCheck, ScrollText, Menu, LogOut, Stamp, Newspaper, KeyRound, ExternalLink, X } from "lucide-react";
+import { Bell, LayoutDashboard, Users, Building2, UserSquare, Handshake, FileText, Wrench, CalendarDays, CalendarRange, Wallet, CheckSquare, FolderLock, BarChart3, Settings, ShieldCheck, ScrollText, Menu, LogOut, Stamp, Newspaper, KeyRound, ExternalLink, X, Gauge, Contact, FileSignature, PiggyBank, Calculator, PanelsTopLeft, Network, MapPinned } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { useAuth } from "../../lib/auth";
-import { api, fmtDateTime } from "../../lib/api";
+import { api, fmtDateTime, branchApi, useBranchPick, cachedGet } from "../../lib/api";
 import { Logo } from "../brand/Logo";
 
 const NAV = [
-  ["Work", [["/erp", "Dashboard", LayoutDashboard, "dashboard"], ["/erp/calendar", "Calendar", CalendarRange, null], ["/erp/tasks", "Tasks", CheckSquare, "tasks"], ["/erp/approvals", "Approvals", Stamp, null]]],
-  ["Sales", [["/erp/leads", "CRM & Leads", Users, "leads"], ["/erp/properties", "Properties", Building2, "properties"], ["/erp/owners", "Owners", UserSquare, "owners"], ["/erp/deals", "Deals", Handshake, "deals"]]],
-  ["Operations", [["/erp/leases", "Leases & Rent", FileText, "leases"], ["/erp/maintenance", "Maintenance", Wrench, "maintenance"], ["/erp/short-stay", "Short-Stay", CalendarDays, "shortstay"], ["/erp/documents", "Documents", FolderLock, "documents"]]],
-  ["Money & admin", [["/erp/finance", "Finance", Wallet, "finance"], ["/erp/reports", "Reports", BarChart3, "reports"], ["/erp/insights", "Insights", Newspaper, "cms"], ["/erp/users", "Users & Roles", ShieldCheck, "users"], ["/erp/settings", "Settings", Settings, "settings|cms"], ["/erp/audit", "Audit Log", ScrollText, "audit"]]],
+  ["Work", [["/erp", "Dashboard", LayoutDashboard, "dashboard"], ["/erp/ceo", "CEO dashboard", Gauge, "ceo"], ["/erp/calendar", "Calendar", CalendarRange, null], ["/erp/tasks", "Tasks", CheckSquare, "tasks"], ["/erp/approvals", "Approvals", Stamp, null]]],
+  ["Customers & sales", [["/erp/customers", "Customers", Contact, "customers"], ["/erp/leads", "CRM & Leads", Users, "leads"], ["/erp/properties", "Properties", Building2, "properties"], ["/erp/owners", "Owners", UserSquare, "owners"], ["/erp/deals", "Deals", Handshake, "deals"], ["/erp/agreements", "Agreements", FileSignature, "agreements"]]],
+  ["Operations", [["/erp/leases", "Leases & Rent", FileText, "leases"], ["/erp/maintenance", "Maintenance", Wrench, "maintenance"], ["/erp/short-stay", "Short stays", CalendarDays, "shortstay"], ["/erp/documents", "Documents", FolderLock, "documents"]]],
+  ["Money", [["/erp/finance", "Finance", Wallet, "finance"], ["/erp/investors", "Investors", PiggyBank, "investors"], ["/erp/reports", "Reports", BarChart3, "reports"], ["/erp/tools", "Tools & calculators", Calculator, null]]],
+  ["Website", [["/erp/website", "Website editor", PanelsTopLeft, "cms"], ["/erp/insights", "Insights", Newspaper, "cms"]]],
+  ["Team & admin", [["/erp/team", "Team chart", Network, null], ["/erp/places", "Branches & places", MapPinned, "settings|properties"], ["/erp/users", "Users & Roles", ShieldCheck, "users"], ["/erp/settings", "Settings", Settings, "settings|cms"], ["/erp/audit", "Audit Log", ScrollText, "audit"]]],
 ];
+
+// Staff who work across branches choose one to narrow every list, total and report; "All" shows everything they may see.
+function BranchPicker({ user }) {
+  const pick = useBranchPick();
+  const [branches, setBranches] = useState([]);
+  useEffect(() => { cachedGet("/branches").then(setBranches).catch(() => {}); }, []);
+  const mine = user.all_branches ? branches : branches.filter((b) => (user.branch_ids || []).includes(b.id));
+  useEffect(() => { if (pick && branches.length && !mine.some((b) => b.id === pick)) branchApi.set(""); }, [branches.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (mine.length < 2) return mine.length === 1 ? <span className="hidden px-2 text-xs text-slate-500 sm:inline" data-testid="branch-name">{mine[0].name} branch</span> : null;
+  return (
+    <select className="max-w-[9.5rem] border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 sm:max-w-none" value={pick} onChange={(e) => branchApi.set(e.target.value)} aria-label="Branch" data-testid="branch-picker">
+      <option value="">{user.all_branches ? "All branches" : "All my branches"}</option>
+      {mine.map((b) => <option key={b.id} value={b.id}>{b.name}{b.is_head_office ? " (HO)" : ""}</option>)}
+    </select>
+  );
+}
 
 function Notifications() {
   const [rows, setRows] = useState([]);
@@ -33,6 +51,7 @@ function Notifications() {
 
 export default function ErpLayout() {
   const { user, logout, can } = useAuth();
+  const branch = useBranchPick();
   const nav = useNavigate();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
@@ -59,15 +78,16 @@ export default function ErpLayout() {
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-3 sm:px-6">
           <div className="flex items-center gap-2"><button className="p-2 lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu" data-testid="erp-menu-toggle"><Menu size={20} /></button><span className="lg:hidden"><Logo size="sm" /></span></div>
-          <span className="hidden text-xs text-slate-400 lg:block">Sellandiamman Estates · staff workspace · times in IST</span>
+          <span className="hidden text-xs text-slate-400 xl:block">Sellandiamman Estates · staff workspace · times in IST</span>
           <div className="flex items-center gap-0.5">
+            <BranchPicker user={user} />
             <Notifications />
             <Link to="/erp/security" className="p-2 text-slate-600 hover:text-slate-900" aria-label="Password & 2-step sign-in" data-testid="change-password-link"><KeyRound size={18} /></Link>
             <button className="flex items-center gap-1 p-2 text-sm text-slate-600 hover:text-slate-900" onClick={async () => { await logout(); nav("/erp/login"); }} data-testid="logout-btn" aria-label="Sign out"><LogOut size={16} /><span className="hidden sm:inline">Sign out</span></button>
           </div>
         </header>
         {user.mfa_enabled === false && (user.role === "super_admin" || user.role === "director") && loc.pathname === "/erp" && <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:px-6" data-testid="mfa-nudge">Your account can approve payments and change settings. <Link to="/erp/security" className="font-semibold underline">Turn on 2-step sign-in</Link> to protect it.</div>}
-        <main className="p-4 sm:p-6 lg:p-8"><Outlet /></main>
+        <main className="p-4 sm:p-6 lg:p-8"><Outlet key={branch} /></main>
       </div>
     </div>
   );

@@ -67,7 +67,9 @@ function setMeta(attr, key, value) {
 export function useMeta({ title, description, image, path, jsonLd, noindex } = {}) {
   const ld = jsonLd ? JSON.stringify(jsonLd) : "";
   useEffect(() => {
-    const full = title ? `${title} | Sellandiamman Estates` : "Sellandiamman Estates · Property services in Erode & Perundurai";
+    const full = title ? `${title} | Sellandiamman Estates` : "Sellandiamman Estates · Property services in Perundurai, Erode, Sathyamangalam, Kadambur & Namakkal";
+    // the server puts this page's structured data into the first HTML; after that the app keeps it up to date
+    document.getElementById("ssr-jsonld")?.remove();
     document.title = full;
     if (description) { setMeta("name", "description", description); setMeta("property", "og:description", description); }
     setMeta("property", "og:title", full);
@@ -118,6 +120,41 @@ export const store = {
   get(k, fallback) { try { const v = localStorage.getItem(k); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
 };
+
+// ---------- Branch picked in the staff app ----------
+// Sent as the X-Branch header, so every list, total and report narrows to that branch. Empty = all your branches.
+let branchPick = store.get("se_branch", "");
+const branchListeners = new Set();
+const applyBranch = () => { if (branchPick) api.defaults.headers.common["X-Branch"] = branchPick; else delete api.defaults.headers.common["X-Branch"]; };
+applyBranch();
+export const branchApi = {
+  get: () => branchPick,
+  set(v) { branchPick = v || ""; store.set("se_branch", branchPick); applyBranch(); branchListeners.forEach((l) => l()); },
+};
+export function useBranchPick() {
+  return useSyncExternalStore((cb) => { branchListeners.add(cb); return () => branchListeners.delete(cb); }, () => branchPick, () => branchPick);
+}
+
+// ---------- Small cache for data every page needs (towns, branches, website text) ----------
+const cache = new Map();
+export function cachedGet(path, maxAgeMs = 5 * 60e3) {
+  const hit = cache.get(path);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.p;
+  const p = api.get(path).then((r) => r.data);
+  p.catch(() => cache.delete(path));
+  cache.set(path, { at: Date.now(), p });
+  return p;
+}
+export const clearCache = (prefix = "") => { [...cache.keys()].forEach((k) => { if (k.startsWith(prefix)) cache.delete(k); }); };
+export function useCached(path, fallback) {
+  const [v, setV] = useState(() => fallback);
+  useEffect(() => { let on = true; if (path) cachedGet(path).then((d) => on && setV(d)).catch(() => {}); return () => { on = false; }; }, [path]);
+  return v;
+}
+// Web-address form of a town or locality name, the same as the server's (routes_seo.slug)
+export const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+export const placeUrl = (city, locality) => `/properties-in/${slugify(city)}${locality ? `/${slugify(locality)}` : ""}`;
+export const mapsUrl = (lat, lng, q) => (lat && lng ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q || "")}`);
 
 // ---------- Shortlist (saved listings, kept in this browser) ----------
 const SL_KEY = "se_shortlist";

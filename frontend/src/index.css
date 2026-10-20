@@ -92,3 +92,21 @@
 .map-pin::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-top-color: #0f172a; border-bottom: 0; }
 .map-pin.on { background: #96979b; }
 .map-pin.on::after { border-top-color: #96979b; }
+
+.geo-pin { width: 22px; height: 22px; background: #0f172a; border: 3px solid #fff; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 2px 6px rgba(15, 23, 42, .35); }
+.stay-block { background: repeating-linear-gradient(135deg, #e2e8f0 0 6px, #f8fafc 6px 12px); border: 1px solid #cbd5e1; }
+/* Organisation chart: a top-down tree with connector lines */
+.org-tree ul { position: relative; display: flex; justify-content: center; padding-top: 22px; margin: 0; }
+.org-tree > ul { padding-top: 0; }
+.org-tree li { position: relative; list-style: none; padding: 22px 8px 0; text-align: center; }
+.org-tree li::before, .org-tree li::after { content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 22px; border-top: 1px solid #94a3b8; }
+.org-tree li::after { right: auto; left: 50%; border-left: 1px solid #94a3b8; }
+.org-tree li:only-child::before, .org-tree li:only-child::after { display: none; }
+.org-tree li:only-child { padding-top: 0; }
+.org-tree li:first-child::before, .org-tree li:last-child::after { border: 0 none; }
+.org-tree li:last-child::before { border-right: 1px solid #94a3b8; }
+.org-tree ul ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 22px; border-left: 1px solid #94a3b8; }
+.org-tree > ul > li { padding-top: 0; }
+.org-tree > ul > li::before, .org-tree > ul > li::after { display: none; }
+/* Agreement preview */
+.agreement-paper { font-family: "Times New Roman", Georgia, serif; }

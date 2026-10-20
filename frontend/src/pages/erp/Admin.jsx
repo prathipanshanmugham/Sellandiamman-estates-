@@ -41,7 +41,7 @@ export function Approvals() {
   );
 }
 
-const REPORTS = [["leads", "Lead funnel & sources", "leads"], ["site_visits", "Site visits & feedback", "leads"], ["deals", "Brokerage deals & commission", "deals"], ["invoices", "Invoices & receivables", "finance"], ["ledger", "Ledger entries (all ledgers)", "finance"], ["expenses", "Company expenses", "finance"], ["owner_statements", "Owner settlements", "finance"], ["leases", "Leases, rent & renewals", "leases"], ["bookings", "Short-stay bookings & payouts", "shortstay"], ["work_orders", "Maintenance jobs & costs", "maintenance"], ["properties", "Listings & authorisation expiry", "properties"]];
+const REPORTS = [["customers", "Customers (contacts and consent)", "customers"], ["agreements", "Agreements register", "agreements"], ["investments", "Investments received", "investors"], ["leads", "Lead funnel & sources", "leads"], ["site_visits", "Site visits & feedback", "leads"], ["deals", "Brokerage deals & commission", "deals"], ["invoices", "Invoices & receivables", "finance"], ["ledger", "Ledger entries (all ledgers)", "finance"], ["expenses", "Company expenses", "finance"], ["owner_statements", "Owner settlements", "finance"], ["leases", "Leases, rent & renewals", "leases"], ["bookings", "Short-stay bookings & payouts", "shortstay"], ["work_orders", "Maintenance jobs & costs", "maintenance"], ["properties", "Listings & authorisation expiry", "properties"]];
 
 export function Reports() {
   const { can } = useAuth();
@@ -59,38 +59,72 @@ export function Reports() {
   );
 }
 
+function BranchChecks({ branches, value, onChange }) {
+  const v = value || [];
+  return (
+    <fieldset className="sm:col-span-2"><legend className="lbl">Branches</legend>
+      <div className="flex flex-wrap gap-3">{branches.map((b) => <label key={b.id} className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={v.includes(b.id)} onChange={(e) => onChange(e.target.checked ? [...v, b.id] : v.filter((x) => x !== b.id))} />{b.name}</label>)}</div>
+      <p className="mt-1 text-xs text-slate-400">None ticked = every branch. Directors and super admins always see every branch.</p>
+    </fieldset>
+  );
+}
+
+const profileFields = (staff, self) => [
+  { name: "designation", label: "Designation", hint: "e.g. Branch Manager – Namakkal" }, { name: "department", label: "Team / department" },
+  { name: "reports_to", label: "Reports to", type: "select", options: staff.filter((u) => u.id !== self).map((u) => ({ value: u.id, label: `${u.name}${u.designation ? ` · ${u.designation}` : ""}` })) },
+  { name: "phone", label: "Phone" }, { name: "whatsapp", label: "WhatsApp" }, { name: "joined_on", label: "Joined on", type: "date" },
+];
+
 export function Users() {
   const { can, user } = useAuth();
   const dialog = useDialog();
   const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState(null);
+  const [investorOpen, setInvestorOpen] = useState(false);
   const { rows, reload, loading } = useList("/users");
   const { rows: roles } = useList("/roles");
   const { rows: branches } = useList("/branches");
+  const { rows: investors } = useList(can("investors") ? "/investors" : "/branches");
   const w = can("users", "w");
-  const roleOpts = roles.filter((r) => r.key !== "owner" && (r.key !== "super_admin" || user.role === "super_admin")).map((r) => ({ value: r.key, label: r.label }));
+  const PORTAL = ["owner", "investor"];
+  const roleOpts = roles.filter((r) => !PORTAL.includes(r.key) && (r.key !== "super_admin" || user.role === "super_admin")).map((r) => ({ value: r.key, label: r.label }));
+  const staff = rows.filter((u) => !PORTAL.includes(u.role) && u.active);
+  const bname = (u) => (PORTAL.includes(u.role) ? "-" : u.branch_ids?.length ? u.branch_ids.map((id) => branches.find((b) => b.id === id)?.name || id).join(", ") : "All");
   const showLink = (title, d) => dialog.notice({ title, body: d.email_status === "sent" ? "We emailed the link. You can also share it yourself:" : "Email is not set up on this server, so share this one-time link with the person securely (for example on WhatsApp):", copy: d.link || d.activation_link });
   return (
     <div>
-      <PageHeader title="Users & roles" sub="Only administrators create accounts. Changing a role or deactivating someone signs them out everywhere.">{w && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-user-btn">New user</button>}</PageHeader>
+      <PageHeader title="Users & roles" sub="Only administrators create accounts. Changing a role or deactivating someone signs them out everywhere.">{w && can("investors") && <button className="btn-line btn-sm" onClick={() => setInvestorOpen(true)} data-testid="new-investor-user-btn">Investor login</button>}{w && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-user-btn">New staff user</button>}</PageHeader>
       <DataTable testid="users-table" loading={loading} rows={rows} columns={[
-        { key: "name", label: "Name", render: (u) => <>{u.name}{u.mfa_enabled && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700">2-step</span>}</> }, { key: "email", label: "Email" },
-        { key: "role", label: "Role", render: (u) => w && u.id !== user.id && u.role !== "owner" ? <select className="border border-slate-200 px-1 py-1 text-xs" value={u.role} onChange={async (e) => { await act(() => api.patch(`/users/${u.id}`, { role: e.target.value }), "Role updated"); reload(); }} aria-label={`Role for ${u.name}`} data-testid={`user-role-${u.email}`}>{roles.filter((r) => r.key !== "owner").map((r) => <option key={r.key} value={r.key} disabled={r.key === "super_admin" && user.role !== "super_admin"}>{r.label}</option>)}</select> : label(u.role) },
+        { key: "name", label: "Name", render: (u) => <>{u.name}{u.mfa_enabled && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700">2-step</span>}{u.designation && <span className="block text-xs text-slate-500">{u.designation}</span>}</> }, { key: "email", label: "Email" },
+        { key: "branches", label: "Branches", render: bname },
+        { key: "role", label: "Role", render: (u) => w && u.id !== user.id && !PORTAL.includes(u.role) ? <select className="border border-slate-200 px-1 py-1 text-xs" value={u.role} onChange={async (e) => { await act(() => api.patch(`/users/${u.id}`, { role: e.target.value }), "Role updated"); reload(); }} aria-label={`Role for ${u.name}`} data-testid={`user-role-${u.email}`}>{roles.filter((r) => !PORTAL.includes(r.key)).map((r) => <option key={r.key} value={r.key} disabled={r.key === "super_admin" && user.role !== "super_admin"}>{r.label}</option>)}</select> : label(u.role) },
         { key: "active", label: "Status", render: (u) => <Badge v={u.active ? "active" : u.last_login ? "inactive" : "invited"} tone={u.active ? "green" : u.last_login ? "grey" : "amber"} /> },
         { key: "last_login", label: "Last sign-in", render: (u) => fmtDateTime(u.last_login) },
-        { key: "x", label: "", render: (u) => w && u.id !== user.id && <span className="flex flex-wrap gap-1">
+        { key: "x", label: "", render: (u) => w && <span className="flex flex-wrap gap-1">
+          {!PORTAL.includes(u.role) && <button className="btn-line btn-sm" onClick={() => setEdit(u)} data-testid={`user-edit-${u.email}`}>Profile & branches</button>}
+          {u.id !== user.id && <>
           <button className="btn-line btn-sm" onClick={async () => { await act(() => api.patch(`/users/${u.id}`, { active: !u.active }), u.active ? "Deactivated" : "Activated"); reload(); }} data-testid={`user-toggle-${u.email}`}>{u.active ? "Deactivate" : "Activate"}</button>
           <button className="btn-line btn-sm" onClick={async () => { const r = await act(() => api.post(`/users/${u.id}/reset-link`)); if (r) showLink(`Password link for ${u.name}`, r.data); }}>Password link</button>
           {u.mfa_enabled && <button className="btn-line btn-sm" onClick={async () => { if (await dialog.confirm({ title: `Reset 2-step sign-in for ${u.name}?`, body: "Use this when they lose their phone. They will sign in with their password and set up 2-step again.", okLabel: "Reset" })) { await act(() => api.post(`/users/${u.id}/mfa-reset`), "2-step sign-in reset"); reload(); } }}>Reset 2-step</button>}
           <button className="btn-line btn-sm" onClick={() => act(() => api.post(`/users/${u.id}/revoke-sessions`), "Signed out everywhere")}>Sign out everywhere</button>
-        </span> }]} />
-      <FormDialog open={open} onClose={() => setOpen(false)} title="New staff user" initial={{ role: "sales_agent" }} fields={[{ name: "name", label: "Name", required: true }, { name: "email", label: "Email", type: "email", required: true }, { name: "phone", label: "Phone" }, { name: "role", label: "Role", type: "select", required: true, options: roleOpts }, { name: "branch", label: "Branch", type: "select", options: branches.map((b) => ({ value: b.id, label: b.name })) }, { name: "password", label: "Initial password (leave blank to send a set-password link)", type: "password", hint: "At least 8 characters" }]}
-        onSubmit={async (v) => { const r = await api.post("/users", { ...v, branch_ids: v.branch ? [v.branch] : [] }); reload(); if (r.data.activation_link) setTimeout(() => showLink(`Account created for ${r.data.name}`, r.data), 50); }} />
+        </>}</span> }]} />
+      <FormDialog open={open} onClose={() => setOpen(false)} title="New staff user" wide initial={{ role: "sales_agent", branch_ids: [] }} fields={[{ name: "name", label: "Name", required: true }, { name: "email", label: "Email", type: "email", required: true }, { name: "role", label: "Role", type: "select", required: true, options: roleOpts }, ...profileFields(staff), { name: "password", label: "Initial password (leave blank to send a set-password link)", type: "password", hint: "At least 8 characters" }]}
+        onSubmit={async (v) => { const r = await api.post("/users", { ...v, branch_ids: v.branch_ids || [] }); reload(); if (r.data.activation_link) setTimeout(() => showLink(`Account created for ${r.data.name}`, r.data), 50); }}>
+        {(v, set) => <BranchChecks branches={branches} value={v.branch_ids} onChange={(ids) => set({ branch_ids: ids })} />}
+      </FormDialog>
+      <FormDialog open={!!edit} onClose={() => setEdit(null)} title={`${edit?.name || ""}: profile & branches`} wide initial={edit ? { ...edit, reports_to: edit.reports_to || "", show_in_directory: edit.show_in_directory !== false } : {}} fields={[{ name: "name", label: "Name", required: true }, ...profileFields(staff, edit?.id), { name: "show_in_directory", label: "Show in the team chart and directory", type: "checkbox" }]}
+        onSubmit={async (v) => { await api.patch(`/users/${edit.id}`, { name: v.name, designation: v.designation, department: v.department, reports_to: v.reports_to || null, phone: v.phone, whatsapp: v.whatsapp, joined_on: v.joined_on || null, show_in_directory: !!v.show_in_directory, branch_ids: v.branch_ids || [] }); reload(); }}>
+        {(v, set) => <BranchChecks branches={branches} value={v.branch_ids} onChange={(ids) => set({ branch_ids: ids })} />}
+      </FormDialog>
+      <FormDialog open={investorOpen} onClose={() => setInvestorOpen(false)} title="Investor dashboard login" initial={{}} fields={[{ name: "investor_id", label: "Investor", type: "select", required: true, options: (investors || []).filter((i) => i.code).map((i) => ({ value: i.id, label: `${i.code} · ${i.name}` })) }, { name: "email", label: "Email", type: "email", required: true }]}
+        onSubmit={async (v) => { const r = await api.post(`/investors/${v.investor_id}/portal-invite`, { email: v.email }); reload(); if (r.data.activation_link) setTimeout(() => showLink(`Login created for ${r.data.name}`, r.data), 50); }}>
+        {() => <p className="text-xs text-slate-500">They see only their own holdings, payouts, statements, documents and project updates.</p>}
+      </FormDialog>
     </div>
   );
 }
 
 const SET_FIELDS = [{ name: "name", label: "Company name" }, { name: "legal_name", label: "Legal name" }, { name: "phone", label: "Phone" }, { name: "whatsapp", label: "WhatsApp number (with country code)", hint: "Leave blank to hide WhatsApp buttons" }, { name: "email", label: "Email" }, { name: "office_hours", label: "Office hours" }, { name: "address", label: "Address", full: true }, { name: "gstin", label: "Company GSTIN" }, { name: "rera_no", label: "TNRERA agent registration no.", hint: "Shown in the footer and on documents" }, { name: "gst_rate", label: "GST rate % (as advised by your accountant)", type: "number" }, { name: "invoice_due_days", label: "Invoice due days", type: "number" }, { name: "gst_enabled", label: "Charge GST on invoices", type: "checkbox" }, { name: "demo_mode", label: "Show the 'sample listings' banner on the website", type: "checkbox" }];
-const CMS_FIELDS = [{ name: "hero_title", label: "Home page headline", full: true }, { name: "hero_subtitle", label: "Home page sub-heading", full: true }, { name: "announcement", label: "Announcement bar (leave blank to hide)", full: true }, { name: "seo_title", label: "Search engine title", full: true }, { name: "seo_description", label: "Search engine description", type: "textarea", full: true }];
 const SOCIAL = [["facebook", "Facebook page"], ["instagram", "Instagram"], ["youtube", "YouTube"], ["linkedin", "LinkedIn"], ["google_business", "Google Business profile"], ["x", "X (Twitter)"]];
 const MFA_ROLES = ["super_admin", "director", "accountant", "branch_manager", "property_manager", "sales_agent", "marketing", "shortstay_ops", "auditor"];
 
@@ -124,18 +158,6 @@ function Checklist() {
   );
 }
 
-function Testimonials({ initial, canEdit }) {
-  const [rows, setRows] = useState(initial || []);
-  const save = () => act(() => api.put("/settings", { testimonials: rows }), "Reviews saved");
-  return (
-    <div className="space-y-3" data-testid="testimonials-editor">
-      <p className="text-xs text-slate-500">Only add real reviews with the customer's permission. They appear on the home page.</p>
-      {rows.map((t, i) => <div key={i} className="grid gap-2 border border-slate-200 p-3 sm:grid-cols-[1fr_200px_auto]"><textarea rows={2} className="inp" placeholder="What the customer said" value={t.quote} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, quote: e.target.value } : x)))} disabled={!canEdit} aria-label="Review text" /><input className="inp" placeholder="Name, area" value={t.name} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} disabled={!canEdit} aria-label="Reviewer" />{canEdit && <button className="btn-line btn-sm" onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>}</div>)}
-      {canEdit && <div className="flex gap-2"><button className="btn-line btn-sm" onClick={() => setRows([...rows, { quote: "", name: "" }])} disabled={rows.length >= 9}>Add review</button><button className="btn-dark btn-sm" onClick={save}>Save reviews</button></div>}
-    </div>
-  );
-}
-
 export function Settings() {
   const { can, user } = useAuth();
   const [s, setS] = useState(null);
@@ -151,19 +173,39 @@ export function Settings() {
       {s && can("settings") && <Section title="Company & tax"><SettingsForm fields={SET_FIELDS} initial={s} canEdit={sw} testid="company-settings" />
         {sw && <div className="mt-4 border-t border-slate-100 pt-4"><p className="lbl">Logo</p><p className="mb-2 text-xs text-slate-500">The SA logo is built in. Upload a file only to replace it (PNG/JPG/WebP, max 1 MB).</p><input type="file" accept="image/png,image/jpeg,image/webp" onChange={logo} data-testid="logo-upload-input" />{s.logo && <button className="btn-line btn-sm ml-2" onClick={async () => { await act(() => api.delete("/settings/logo"), "Back to the built-in logo"); setS({ ...s, logo: null }); }}>Use built-in logo</button>}</div>}
       </Section>}
-      {s && can("cms") && <Section title="Home page & search engines"><SettingsForm fields={CMS_FIELDS} initial={s} canEdit={can("cms", "w")} testid="cms-settings" /><p className="mt-3 text-xs text-slate-400">Publish and feature listings from each property's page. Approve owner photos for the website from the property's documents panel.</p></Section>}
-      {s && can("cms") && <Section title="Customer reviews"><Testimonials initial={s.testimonials} canEdit={can("cms", "w")} /></Section>}
+      {can("cms") && <Section title="Website text, photos and reviews"><p className="text-sm text-slate-600">The home page, services, FAQ, About page, reviews and search-engine text are edited in the <Link to="/erp/website" className="font-medium underline">Website editor</Link>, with a preview before publishing. Branch addresses and town pages are under <Link to="/erp/places" className="font-medium underline">Branches & places</Link>.</p></Section>}
+      {s && can("settings") && <div className="grid gap-6 xl:grid-cols-2">
+        <Section title="Agreements" testid="agreement-settings"><SettingsForm fields={[{ name: "agreement_signatory", label: "Signs agreements for the company", hint: "Name printed under the company's signature" }, { name: "agreement_signatory_designation", label: "Designation", hint: "e.g. Managing Director" }]} initial={s} canEdit={sw} testid="agreement-signatory" /></Section>
+        <Section title="CEO dashboard targets" testid="ceo-targets"><Targets initial={s} canEdit={sw} /></Section>
+      </div>}
       {s && can("settings") && <div className="grid gap-6 xl:grid-cols-2">
         <Section title="Social media links" testid="social-settings"><SocialSave initial={s.social || {}} canEdit={sw} /></Section>
         <Section title="Security & alerts" testid="security-policy">
           <p className="text-sm text-slate-600">Require 2-step sign-in for these roles:</p>
           <MfaRoles initial={s.mfa_required_roles || []} canEdit={sw} selfRole={user.role} selfMfa={user.mfa_enabled} />
           <EmailToggle initial={!!s.email_notifications} canEdit={sw} />
-          <MapCentre initial={s.map_center || { lat: 11.31, lng: 77.65, zoom: 11 }} canEdit={sw} />
+          <MapCentre initial={s.map_center || { lat: 11.36, lng: 77.68, zoom: 9 }} canEdit={sw} />
         </Section>
       </div>}
       {can("cms") && <Section title="Campaigns & lead sources" actions={can("cms", "w") && <button className="btn-line btn-sm" onClick={() => setCamp(true)} data-testid="new-campaign-btn">New campaign</button>}><p className="mb-3 text-xs text-slate-500">Add <code>?utm_source=facebook&utm_campaign=CODE</code> to the links in your ads. Website enquiries from those links are counted against the campaign.</p><DataTable testid="campaigns-table" rows={camps.filter((c) => c.code)} columns={[{ key: "name", label: "Campaign" }, { key: "code", label: "Code" }, { key: "channel", label: "Channel", render: (c) => label(c.channel) }, { key: "budget", label: "Budget", render: (c) => inr(c.budget) }, { key: "leads", label: "Leads" }, { key: "won", label: "Won" }]} /></Section>}
       <FormDialog open={camp} onClose={() => setCamp(false)} title="New campaign" fields={[{ name: "name", label: "Name", required: true }, { name: "code", label: "Code (utm_campaign)", required: true }, { name: "channel", label: "Channel", type: "select", options: opts(["social", "search_ads", "print", "referral", "portal", "whatsapp"]) }, { name: "budget", label: "Budget (₹)", type: "number" }, { name: "start_date", label: "Start", type: "date" }]} onSubmit={async (v) => { await api.post("/campaigns", v); reload(); }} />
+    </div>
+  );
+}
+
+const PILLARS = [["growth", "Growth", 15], ["profit", "Revenue & profit", 20], ["cash", "Cash & collections", 20], ["sales", "Sales", 15], ["portfolio", "Portfolio", 15], ["service", "Service & compliance", 15]];
+function Targets({ initial, canEdit }) {
+  const { rows: branches } = useList("/branches");
+  const [t, setT] = useState(initial.targets?.monthly_revenue || {});
+  const [w, setW] = useState(Object.fromEntries(PILLARS.map(([k, , d]) => [k, initial.health_weights?.[k] ?? d])));
+  const total = Object.values(w).reduce((a, x) => a + (Number(x) || 0), 0);
+  return (
+    <div className="space-y-4">
+      <div><p className="text-sm text-slate-600">Monthly company revenue target (₹). The dashboard pro-rates it to the dates you pick.</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">{[{ id: "all", name: "Whole company (optional)" }, ...branches].map((b) => <div key={b.id}><label className="lbl" htmlFor={`tg-${b.id}`}>{b.name}</label><input id={`tg-${b.id}`} type="number" min="0" className="inp" value={t[b.id] ?? ""} disabled={!canEdit} onChange={(e) => setT({ ...t, [b.id]: e.target.value })} /></div>)}</div></div>
+      <div><p className="text-sm text-slate-600">How much each part counts in the health score (total {total}).</p>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">{PILLARS.map(([k, l]) => <div key={k}><label className="lbl" htmlFor={`hw-${k}`}>{l}</label><input id={`hw-${k}`} type="number" min="0" max="100" className="inp" value={w[k]} disabled={!canEdit} onChange={(e) => setW({ ...w, [k]: e.target.value })} /></div>)}</div></div>
+      {canEdit && <button className="btn-dark btn-sm" onClick={() => act(() => api.put("/settings", { targets: { monthly_revenue: Object.fromEntries(Object.entries(t).filter(([, v]) => v !== "" && v != null)) }, health_weights: Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Number(v) || 0])) }), "Saved")} data-testid="save-targets-btn">Save</button>}
     </div>
   );
 }

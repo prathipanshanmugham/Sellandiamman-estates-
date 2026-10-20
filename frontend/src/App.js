@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, HashRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
-import { AuthProvider, Protected, OwnerOnly, Gate } from "./lib/auth";
+import { AuthProvider, Protected, OwnerOnly, InvestorOnly, Gate } from "./lib/auth";
 import { DialogProvider } from "./lib/dialogs";
 import { IS_DEMO } from "./lib/api";
 import SiteLayout from "./components/public/SiteLayout";
@@ -9,7 +9,7 @@ import Home from "./pages/public/Home";
 import Catalogue from "./pages/public/Catalogue";
 import PropertyDetail from "./pages/public/PropertyDetail";
 import ListProperty from "./pages/public/ListProperty";
-import Tools from "./pages/public/Tools";
+import PlacePage from "./pages/public/Places";
 import Shortlist from "./pages/public/Shortlist";
 import { Insights, Article } from "./pages/public/Insights";
 import { Services, ServiceDetail, About, Contact, Faq, Legal, Requirement, NotFound } from "./pages/public/Pages";
@@ -33,7 +33,19 @@ const DealDetail = named(erp, "DealDetail");
 const Finance = named(erp, "Finance");
 const Leases = named(erp, "Leases");
 const Maintenance = named(erp, "Maintenance");
-const ShortStay = named(erp, "ShortStay");
+const ShortStay = named(erp, "StayDesk");
+const Ceo = named(erp, "Ceo");
+const Customers = named(erp, "Customers");
+const CustomerDetail = named(erp, "CustomerDetail");
+const AgreementsList = named(erp, "AgreementsList");
+const AgreementEditor = named(erp, "AgreementEditor");
+const InvestorsHome = named(erp, "InvestorsHome");
+const InvestorDetail = named(erp, "InvestorDetail");
+const ProjectDetail = named(erp, "ProjectDetail");
+const WebsiteEditor = named(erp, "WebsiteEditor");
+const Team = named(erp, "Team");
+const Places = named(erp, "Places");
+const Tools = named(erp, "Tools");
 const Documents = named(erp, "Documents");
 const InsightsList = named(erp, "InsightsList");
 const InsightEditor = named(erp, "InsightEditor");
@@ -51,6 +63,13 @@ const OwnerStatements = named(owner, "OwnerStatements");
 const OwnerRequests = named(owner, "OwnerRequests");
 const OwnerStays = named(owner, "OwnerStays");
 const OwnerDocuments = named(owner, "OwnerDocuments");
+const investor = () => import("./pages/investor/InvestorPortal");
+const InvestorLayout = named(investor, "InvestorLayout");
+const InvestorOverview = named(investor, "InvestorOverview");
+const InvestorHolding = named(investor, "InvestorHolding");
+const InvestorPayouts = named(investor, "InvestorPayouts");
+const InvestorUpdates = named(investor, "InvestorUpdates");
+const InvestorDocuments = named(investor, "InvestorDocuments");
 const Wait = () => <div className="flex min-h-[40vh] items-center justify-center p-10 text-sm text-slate-500">Loading…</div>;
 
 const g = (m, el) => <Gate module={m}>{el}</Gate>;
@@ -71,7 +90,8 @@ export default function App({ children }) {
               <Route path="/services" element={<Services />} />
               <Route path="/services/:slug" element={<ServiceDetail />} />
               <Route path="/list-property" element={<ListProperty />} />
-              <Route path="/tools" element={<Tools />} />
+              <Route path="/properties-in/:city" element={<PlacePage />} />
+              <Route path="/properties-in/:city/:locality" element={<PlacePage />} />
               <Route path="/shortlist" element={<Shortlist />} />
               <Route path="/insights" element={<Insights />} />
               <Route path="/insights/:slug" element={<Article />} />
@@ -87,6 +107,19 @@ export default function App({ children }) {
             <Route path="/erp/setup-2-step" element={<Protected><ForcedSetup /></Protected>} />
             <Route path="/erp" element={<Protected><ErpLayout /></Protected>}>
               <Route index element={g("dashboard", <Dashboard />)} />
+              <Route path="ceo" element={g("ceo", <Ceo />)} />
+              <Route path="customers" element={g("customers", <Customers />)} />
+              <Route path="customers/:id" element={g("customers", <CustomerDetail />)} />
+              <Route path="agreements" element={g("agreements", <AgreementsList />)} />
+              <Route path="agreements/new" element={g("agreements", <AgreementEditor />)} />
+              <Route path="agreements/:id" element={g("agreements", <AgreementEditor />)} />
+              <Route path="investors" element={g("investors", <InvestorsHome />)} />
+              <Route path="investors/:id" element={g("investors", <InvestorDetail />)} />
+              <Route path="inv-projects/:id" element={g("investors", <ProjectDetail />)} />
+              <Route path="website" element={g("cms", <WebsiteEditor />)} />
+              <Route path="team" element={<Team />} />
+              <Route path="places" element={<Places />} />
+              <Route path="tools" element={<Tools />} />
               <Route path="calendar" element={<Calendar />} />
               <Route path="leads" element={g("leads", <Leads />)} />
               <Route path="leads/:id" element={g("leads", <LeadDetail />)} />
@@ -118,6 +151,13 @@ export default function App({ children }) {
               <Route path="requests" element={<OwnerRequests />} />
               <Route path="stays" element={<OwnerStays />} />
               <Route path="documents" element={<OwnerDocuments />} />
+            </Route>
+            <Route path="/investor" element={<InvestorOnly><InvestorLayout /></InvestorOnly>}>
+              <Route index element={<InvestorOverview />} />
+              <Route path="holdings/:id" element={<InvestorHolding />} />
+              <Route path="payouts" element={<InvestorPayouts />} />
+              <Route path="updates" element={<InvestorUpdates />} />
+              <Route path="documents" element={<InvestorDocuments />} />
             </Route>
           </Routes>
           </Suspense>

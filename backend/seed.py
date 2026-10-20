@@ -143,8 +143,8 @@ async def _locations():
     import re as _re
     for b in await db.branches.find({}, {"_id": 0}).to_list(100):
         c = await ensure_place(b["city"], branch_id=b["id"])
-        if c and not c.get("branch_id"):
-            await db.locations.update_one({"id": c["id"]}, {"$set": {"branch_id": b["id"], "district": b.get("district")}})
+        if c and (not c.get("branch_id") or not c.get("district")):
+            await db.locations.update_one({"id": c["id"]}, {"$set": {"branch_id": c.get("branch_id") or b["id"], "district": c.get("district") or b.get("district")}})
         if b.get("lat") and c and not c.get("lat"):
             await db.locations.update_one({"id": c["id"]}, {"$set": {"lat": b["lat"], "lng": b["lng"], "pincode": b.get("pincode")}})
     n = 0
@@ -829,8 +829,8 @@ async def seed_demo():
     await db.bookings.update_one({"id": req["id"]}, {"$set": {"created_at": _iso(t - timedelta(days=1), 19)}})
 
     # ---------- company expenses (last six months) ----------
-    branch_costs = [("br-erode", 18000, 24000, 6000), ("br-perundurai", 22000, 26000, 5000), ("br-sathyamangalam", 9000, 12000, 2500),
-                    ("br-namakkal", 10000, 12000, 3000), ("br-kadambur", 6000, 8000, 1000)]
+    branch_costs = [("br-erode", 18000, 12000, 6000), ("br-perundurai", 20000, 12000, 5000), ("br-sathyamangalam", 8000, 6000, 2000),
+                    ("br-namakkal", 9000, 6000, 2500), ("br-kadambur", 5000, 3000, 1000)]
     for m in range(5, -1, -1):
         mday = _month_shift(t, -m)
         for br, rent, staff_cost, ads in branch_costs:
@@ -845,10 +845,12 @@ async def seed_demo():
     # older brokerage income for a fuller 6-month trend
     for m, amt, who, br in ((5, 45000, "Ravi Textiles", "br-perundurai"), (4, 62000, "Sundar & Co", "br-erode"),
                             (3, 38000, "Velmurugan K", "br-sathyamangalam"), (2, 54000, "Sri Kumaran Spinning Mills", "br-perundurai"),
-                            (1, 26000, "Gowtham R", "br-namakkal"), (2, 18000, "Selvi Farms", "br-kadambur")):
+                            (1, 26000, "Gowtham R", "br-namakkal"), (2, 18000, "Selvi Farms", "br-kadambur"),
+                            (1, 72000, "Arun Engineering Works", "br-perundurai"), (0, 31000, "Malar Textiles", "br-erode"),
+                            (3, 24000, "Kumar Agencies", "br-namakkal"), (4, 41000, "Ganga Weaving Mills", "br-perundurai")):
         inv = await fin.new_invoice(fin.InvoiceIn(type="brokerage", customer_name=who, branch_id=br,
                                                   lines=[fin.LineIn(description="Brokerage commission", qty=1, rate=amt)]), acc)
-        day = _month_shift(t, -m).replace(day=20)
+        day = min(_month_shift(t, -m).replace(day=20), t)
         pay = await fin.record_payment(inv["id"], fin.PaymentIn(amount=amt, method="bank_transfer", date=day.isoformat(),
                                                                 reference=f"UTR{rnd.randint(100000, 999999)}", idempotency_key=key()), acc)
         await db.invoices.update_one({"id": inv["id"]}, {"$set": {"issue_date": (day - timedelta(days=6)).isoformat(),

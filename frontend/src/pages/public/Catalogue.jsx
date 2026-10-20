@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { LayoutGrid, List, Map as MapIcon, SlidersHorizontal, X } from "lucide-react";
-import { api, useMeta, priceLabel, label, imgSrc, useMedia } from "../../lib/api";
+import { api, useMeta, priceLabel, label, imgSrc, useMedia, useCached, placeUrl } from "../../lib/api";
 import PropertyCard, { SaveButton } from "../../components/public/PropertyCard";
 import PropertyMap from "../../components/public/PropertyMap";
 import { useSite } from "../../components/public/SiteLayout";
@@ -11,8 +11,9 @@ const FIELDS = ["transaction", "category", "city", "locality", "pincode", "min_p
 const FILTER_LABELS = { transaction: "Looking to", category: "Type", city: "City", locality: "Locality", pincode: "PIN", min_price: "Min ₹", max_price: "Max ₹", bedrooms: "Beds", bathrooms: "Baths", min_area: "Min area", max_area: "Max area", furnishing: "Furnishing", feature: "Feature", q: "Search" };
 const PAGE = 12;
 
-function Filters({ params, setParam, reset }) {
+function Filters({ params, setParam, reset, towns }) {
   const v = (k) => params.get(k) || "";
+  const town = towns.find((t) => t.name === v("city"));
   const sel = (k, options, lab) => (
     <div><label className="lbl" htmlFor={`f-${k}`}>{lab}</label><select id={`f-${k}`} className="inp" value={v(k)} onChange={(e) => setParam(k, e.target.value)} data-testid={`filter-${k}`}>{options.map(([val, l]) => <option key={val} value={val}>{l}</option>)}</select></div>
   );
@@ -22,8 +23,8 @@ function Filters({ params, setParam, reset }) {
       <div><label className="lbl" htmlFor="f-q">Search</label><input id="f-q" className="inp" placeholder="Locality, title or listing ID" value={v("q")} onChange={(e) => setParam("q", e.target.value)} data-testid="filter-q" /></div>
       {sel("transaction", [["", "Any"], ["sale", "Buy"], ["rent", "Rent"], ["lease", "Lease"], ["short_stay", "Short stay"]], "Looking to")}
       {sel("category", [["", "All types"], ["residential,apartment,villa", "Homes"], ["land,agricultural", "Land & plots"], ["commercial,shop,office", "Shops & offices"], ["industrial,factory_shed", "Industrial / sheds"], ["warehouse", "Warehouse"], ["other", "Other"]], "Property type")}
-      {sel("city", [["", "All"], ["Erode", "Erode"], ["Perundurai", "Perundurai"]], "City")}
-      <div className="grid grid-cols-2 gap-3"><div><label className="lbl" htmlFor="f-locality">Locality</label><input id="f-locality" className="inp" value={v("locality")} onChange={(e) => setParam("locality", e.target.value)} data-testid="filter-locality" /></div><div><label className="lbl" htmlFor="f-pin">PIN code</label><input id="f-pin" className="inp" maxLength={6} inputMode="numeric" value={v("pincode")} onChange={(e) => setParam("pincode", e.target.value)} data-testid="filter-pincode" /></div></div>
+      <div><label className="lbl" htmlFor="f-city">Town</label><select id="f-city" className="inp" value={v("city")} onChange={(e) => setParam("city", e.target.value, ["locality"])} data-testid="filter-city"><option value="">All towns</option>{towns.map((t) => <option key={t.id} value={t.name}>{t.name}{t.listings ? ` (${t.listings})` : ""}</option>)}{v("city") && !town && <option value={v("city")}>{v("city")}</option>}</select></div>
+      <div className="grid grid-cols-2 gap-3"><div><label className="lbl" htmlFor="f-locality">Locality</label>{town?.localities?.length ? <select id="f-locality" className="inp" value={v("locality")} onChange={(e) => setParam("locality", e.target.value)} data-testid="filter-locality"><option value="">All</option>{town.localities.map((l) => <option key={l.id} value={l.name}>{l.name}{l.listings ? ` (${l.listings})` : ""}</option>)}</select> : <input id="f-locality" className="inp" value={v("locality")} onChange={(e) => setParam("locality", e.target.value)} data-testid="filter-locality" />}</div><div><label className="lbl" htmlFor="f-pin">PIN code</label><input id="f-pin" className="inp" maxLength={6} inputMode="numeric" value={v("pincode")} onChange={(e) => setParam("pincode", e.target.value)} data-testid="filter-pincode" /></div></div>
       <div className="grid grid-cols-2 gap-3">{num("min_price", "Min ₹")}{num("max_price", "Max ₹")}</div>
       <div className="grid grid-cols-2 gap-3">{num("bedrooms", "Beds (min)")}{num("bathrooms", "Baths (min)")}</div>
       <div className="grid grid-cols-2 gap-3">{num("min_area", "Min area")}{num("max_area", "Max area")}</div>
@@ -46,7 +47,8 @@ function ListRow({ p }) {
 
 export default function Catalogue() {
   const site = useSite();
-  useMeta({ title: "Properties for sale, rent and lease", description: "Search verified homes, land, shops, offices, warehouses and factory sheds in Erode and Perundurai.", path: "/properties" });
+  const towns = useCached("/public/locations", []);
+  useMeta({ title: "Properties for sale, rent and lease", description: `Search verified homes, land, shops, offices, warehouses and factory sheds in ${towns.map((t) => t.name).join(", ") || "Perundurai, Erode, Kadambur, Sathyamangalam and Namakkal"}.`, path: "/properties" });
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState({ items: [], total: 0 });
   const [mapItems, setMapItems] = useState([]);
@@ -65,7 +67,7 @@ export default function Catalogue() {
     }, 250);
     return () => clearTimeout(t);
   }, [query, page, view]);
-  const setParam = (k, val) => { const n = new URLSearchParams(params); if (val) n.set(k, val); else n.delete(k); n.delete("page"); setParams(n, { replace: true }); };
+  const setParam = (k, val, clear = []) => { const n = new URLSearchParams(params); if (val) n.set(k, val); else n.delete(k); clear.forEach((c) => n.delete(c)); n.delete("page"); setParams(n, { replace: true }); };
   const active = FIELDS.filter((k) => k !== "sort" && params.get(k));
   const pages = Math.ceil(data.total / PAGE);
   const pickedItem = mapItems.find((x) => x.listing_id === picked);
@@ -75,7 +77,7 @@ export default function Catalogue() {
       <p className="eyebrow">Property catalogue</p>
       <h1 className="mt-2 font-heading text-3xl font-semibold sm:text-4xl">Find a property</h1>
       <div className="mt-8 grid gap-10 lg:grid-cols-[280px_1fr]">
-        {wide && <aside><Filters params={params} setParam={setParam} reset={() => setParams({})} /></aside>}
+        {wide && <aside><Filters params={params} setParam={setParam} reset={() => setParams({})} towns={towns} /></aside>}
         <div className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -87,6 +89,7 @@ export default function Catalogue() {
               {[["grid", LayoutGrid, "Grid view"], ["list", List, "List view"], ["map", MapIcon, "Map view"]].map(([v, I, l]) => <button key={v} className={`btn-line btn-sm ${view === v ? "!border-slate-900 !bg-slate-900 !text-white" : ""}`} onClick={() => changeView(v)} aria-label={l} aria-pressed={view === v} data-testid={`view-${v}-btn`}><I size={14} /></button>)}
             </div>
           </div>
+          {params.get("city") && <p className="mb-3 text-xs text-slate-500">Guide to this area: <Link to={placeUrl(params.get("city"), params.get("locality"))} className="underline" data-testid="place-guide-link">Property in {params.get("locality") ? `${params.get("locality")}, ` : ""}{params.get("city")}</Link></p>}
           {active.length > 0 && <div className="mb-5 flex flex-wrap gap-2" data-testid="active-filters">{active.map((k) => <button key={k} className="chip" onClick={() => setParam(k, "")}>{FILTER_LABELS[k]}: {label(params.get(k).split(",")[0])}{params.get(k).includes(",") ? "…" : ""}<X size={12} /></button>)}</div>}
           {!loading && !data.items.length && <div className="border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500" data-testid="catalogue-empty">No properties match these filters. <Link to="/requirement" className="underline">Post your requirement</Link> and we will tell you when one comes up.</div>}
           {view === "map" ? (
@@ -101,7 +104,7 @@ export default function Catalogue() {
       <Sheet open={sheet && !wide} onOpenChange={setSheet}>
         <SheetContent side="left" className="w-[88vw] max-w-sm overflow-y-auto">
           <SheetHeader><SheetTitle className="font-heading">Filters</SheetTitle></SheetHeader>
-          <div className="mt-4"><Filters params={params} setParam={setParam} reset={() => setParams({})} /></div>
+          <div className="mt-4"><Filters params={params} setParam={setParam} reset={() => setParams({})} towns={towns} /></div>
           <button className="btn-dark mt-6 w-full" onClick={() => setSheet(false)} data-testid="apply-filters-btn">Show {data.total} {data.total === 1 ? "property" : "properties"}</button>
         </SheetContent>
       </Sheet>

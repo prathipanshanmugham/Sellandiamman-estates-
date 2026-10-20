@@ -25,7 +25,8 @@ services:
       SITE_URL: https://${DOMAIN:?Set DOMAIN in .env}
       CORS_ORIGINS: https://${DOMAIN}
       COOKIE_SECURE: "true"
-    volumes: ["uploads:/data/uploads"]
+      SITE_SHELL: /shell/index.html
+    volumes: ["uploads:/data/uploads", "site_shell:/shell:ro"]
     depends_on:
       mongo: { condition: service_healthy }
 
@@ -42,7 +43,9 @@ services:
       DOMAIN: ${DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
     ports: ["80:80", "443:443", "443:443/udp"]
-    volumes: ["caddy_data:/data", "caddy_config:/config"]
+    # share the built index.html with the backend, which adds search-engine text to each page
+    command: ["sh", "-c", "cp /srv/index.html /shell/index.html && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
+    volumes: ["caddy_data:/data", "caddy_config:/config", "site_shell:/shell"]
     depends_on: [backend]
 
   backup:
@@ -62,3 +65,4 @@ volumes:
   uploads:
   caddy_data:
   caddy_config:
+  site_shell:

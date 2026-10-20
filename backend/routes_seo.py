@@ -26,7 +26,8 @@ SHELL_PATHS = [os.environ.get("SITE_SHELL") or "/shell/index.html", str(ROOT.par
 _shell = {"path": None, "mtime": 0.0, "text": None}
 E = lambda v: html.escape(str(v if v is not None else ""), quote=True)  # noqa: E731
 LIVE = {"status": {"$in": ["published", "under_offer"]}, "deleted": {"$ne": True}}
-TX = {"sale": "for sale", "rent": "for rent", "lease": "for lease", "short_stay": "short stay"}
+TX = {"sale": "for sale", "rent": "for rent", "lease": "for lease", "short_stay": "for short stays"}
+PER = {"rent": " a month", "lease": " a month", "short_stay": " a night"}
 CAT = {"residential": "house", "apartment": "apartment", "villa": "villa", "land": "plot", "agricultural": "agricultural land",
        "commercial": "commercial property", "shop": "shop", "office": "office space", "industrial": "industrial plot",
        "warehouse": "warehouse", "factory_shed": "factory shed", "other": "property"}
@@ -233,13 +234,17 @@ async def resolve(path, query, base):
         facts = []
         for tx, ps in by_tx.items():
             prices = [p["price"] for p in ps if p.get("price") and not p.get("price_on_request")]
-            facts.append(f"{len(ps)} {'property' if len(ps) == 1 else 'properties'} {TX.get(tx, tx)}" +
-                         (f", from {inr_short(min(prices))} to {inr_short(max(prices))}" if prices else ""))
+            rng = ""
+            if prices:
+                lo, hi = min(prices), max(prices)
+                rng = (f" at {inr_short(lo)}" if lo == hi else f", {inr_short(lo)} to {inr_short(hi)}") + PER.get(tx, "")
+            facts.append(f"{len(ps)} {'property' if len(ps) == 1 else 'properties'} {TX.get(tx, tx)}{rng}")
         branch = next((b for b in branches if b.get("city", "").lower() == town.lower()), None)
         faq = [{"q": f"How many properties are listed in {place}?", "a": f"As of {today_ist().strftime('%d %B %Y')}, {name} lists {len(rows)} verified "
                                                                          f"{'property' if len(rows) == 1 else 'properties'} in {place}" + (f": {'; '.join(facts)}." if facts else ".")},
                {"q": f"Who can help me buy, rent or lease property in {place}?",
-                "a": f"{name}{' has a branch in ' + town if branch else ' covers ' + place} and can arrange site visits, verify documents and handle rental agreements. Call {s.get('phone')}."},
+                "a": f"{name}{' has a branch in ' + town if branch else ' covers ' + place} and can arrange site visits, verify documents and handle rental agreements."
+                     + (f" Call {s.get('phone')}." if s.get("phone") and "00000" not in s.get("phone") else "")},
                {"q": f"Can I list my property in {place} with {name}?", "a": "Yes. Submit it on the 'List your property' page; the team verifies ownership and agrees terms in writing before publishing."}]
         body = (f"<nav><a href='/'>Home</a> / <a href='/properties-in/{slug(town)}'>{E(town)}</a>{' / ' + E(loc) if loc else ''}</nav>"
                 f"<h1>Properties in {E(place)}</h1><p>{E((info or {}).get('intro') or f'Homes, plots, shops, offices and industrial spaces for sale, rent and lease in {place}, verified by {name}.')}</p>"
@@ -342,7 +347,7 @@ def _md_html(md):
             continue
         inline = E(t)
         inline = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", inline)
-        inline = re.sub(r"!\[([^\]]*)\]\(([^)\s]+)\)", r'<img src="\2" alt="\1" loading="lazy">', inline)
+        inline = re.sub(r"!\[([^\]]*)\]\(((?:/|https://)[^)\s]+)\)", r'<img src="\2" alt="\1" loading="lazy">', inline)
         inline = re.sub(r"\[([^\]]+)\]\(((?:/|https?://)[^)\s]+)\)", r'<a href="\2">\1</a>', inline)
         m = re.match(r"^(#{2,3})\s+(.*)$", inline)
         if m:
@@ -387,7 +392,7 @@ def render(shell, status, title, desc, canon, image, ld, body, robots, base, sit
     return s
 
 
-@router.get("/seo/page")
+@router.api_route("/seo/page", methods=["GET", "HEAD"])
 async def seo_page(request: Request, path: str = "/"):
     shell = load_shell()
     if not shell:
@@ -404,7 +409,7 @@ async def seo_page(request: Request, path: str = "/"):
     return HTMLResponse(page, status_code=status, headers={"Cache-Control": "no-cache"})
 
 
-@router.get("/sitemap.xml")
+@router.api_route("/sitemap.xml", methods=["GET", "HEAD"])
 async def sitemap(request: Request):
     base = base_url(request)
     from routes_cms import published
@@ -438,7 +443,7 @@ async def sitemap(request: Request):
     return Response("".join(out), media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
 
 
-@router.get("/robots.txt")
+@router.api_route("/robots.txt", methods=["GET", "HEAD"])
 async def robots(request: Request):
     base = base_url(request)
     rules = "Allow: /\nAllow: /s/\nAllow: /api/public/media/\nDisallow: /erp\nDisallow: /owner\nDisallow: /investor\nDisallow: /shortlist\nDisallow: /api/\n"
@@ -492,11 +497,11 @@ async def _llms(request, full=False):
     return "\n".join(lines)
 
 
-@router.get("/llms.txt")
+@router.api_route("/llms.txt", methods=["GET", "HEAD"])
 async def llms(request: Request):
     return Response(await _llms(request), media_type="text/plain; charset=utf-8", headers={"Cache-Control": "public, max-age=3600"})
 
 
-@router.get("/llms-full.txt")
+@router.api_route("/llms-full.txt", methods=["GET", "HEAD"])
 async def llms_full(request: Request):
     return Response(await _llms(request, True), media_type="text/plain; charset=utf-8", headers={"Cache-Control": "public, max-age=3600"})

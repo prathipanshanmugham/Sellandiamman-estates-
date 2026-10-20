@@ -5,9 +5,11 @@ import { priceLabel } from "../../lib/api";
 // Tiles default to OpenStreetMap. Set REACT_APP_MAP_TILES (and REACT_APP_MAP_ATTRIBUTION) to use a tile provider with a key.
 const TILES = process.env.REACT_APP_MAP_TILES || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const ATTRIB = process.env.REACT_APP_MAP_ATTRIBUTION || "&copy; OpenStreetMap contributors";
-const TOWNS = [["Erode", 11.341, 77.7172], ["Perundurai", 11.2756, 77.5875], ["SIPCOT", 11.258, 77.556], ["Chithode", 11.393, 77.665], ["Bhavani", 11.4455, 77.6826]];
+const TOWNS = [["Erode", 11.341, 77.7172], ["Perundurai", 11.2756, 77.5875], ["SIPCOT", 11.258, 77.556], ["Chithode", 11.393, 77.665], ["Bhavani", 11.4455, 77.6826], ["Sathyamangalam", 11.5048, 77.2384], ["Namakkal", 11.2189, 78.1677], ["Gobichettipalayam", 11.4553, 77.4422]];
 
-const short = (p) => priceLabel(p).replace(" on request", "").replace("/month", "/mo").replace("/night", "/nt");
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+// a price on listing pins; any other label (e.g. a branch name) when the item carries "pin"
+const short = (p) => esc(p.pin || priceLabel(p).replace(" on request", "").replace("/month", "/mo").replace("/night", "/nt"));
 
 export default function PropertyMap({ items, center, onSelect, selected, height = 520 }) {
   const box = useRef(null);

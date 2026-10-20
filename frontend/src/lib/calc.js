@@ -148,3 +148,87 @@ export function shortStayEstimate({ nightly, occupancyPct = 55, avgStay = 2, cle
   return { nights: r2(nights), stays: r2(stays), room: r2(room), platform: r2(platform), fee: r2(fee), cleaning: r2(cleaningCost),
     fixed: r2(fixedMonthly), owner: r2(owner), vsLongTerm: r2(owner - (Number(longTermRent) || 0)) };
 }
+
+// ---------- XIRR: yearly return on dated cash flows (money out negative, money in positive) ----------
+export function xirr(flows) {
+  const f = (flows || []).filter((x) => x.date && Number(x.amount)).map((x) => ({ t: Date.parse(`${x.date}T00:00:00Z`), a: Number(x.amount) })).sort((a, b) => a.t - b.t);
+  if (f.length < 2 || !f.some((x) => x.a < 0) || !f.some((x) => x.a > 0)) return null;
+  const t0 = f[0].t;
+  const npv = (r) => f.reduce((s, x) => s + x.a / (1 + r) ** ((x.t - t0) / (365 * 864e5)), 0);
+  let lo = -0.9999, hi = 10;
+  if (npv(lo) * npv(hi) > 0) return null;
+  for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2; if (npv(lo) * npv(mid) <= 0) hi = mid; else lo = mid; if (hi - lo < 1e-9) break; }
+  return r2(((lo + hi) / 2) * 100);
+}
+
+// ---------- Capital gains on selling land or a building (individuals / HUF, resident) ----------
+// Long term after 24 months. From 23 July 2024: 12.5% without indexation. For property bought before 23 July 2024,
+// resident individuals and HUFs may instead pay 20% with indexation, whichever is lower. Cost Inflation Index (CII)
+// base year 2001-02 = 100; properties bought earlier use the fair market value on 1 April 2001.
+export const CII = { 2001: 100, 2002: 105, 2003: 109, 2004: 113, 2005: 117, 2006: 122, 2007: 129, 2008: 137, 2009: 148, 2010: 167, 2011: 184, 2012: 200, 2013: 220, 2014: 240, 2015: 254, 2016: 264, 2017: 272, 2018: 280, 2019: 289, 2020: 301, 2021: 317, 2022: 331, 2023: 348, 2024: 363, 2025: 376 };
+export const fyOf = (date) => { const d = new Date(`${date}T00:00:00Z`); const y = d.getUTCFullYear(); return d.getUTCMonth() < 3 ? y - 1 : y; }; // 2025 = FY 2025-26
+export function capitalGains({ buyDate, sellDate, cost, improvement = 0, improvementDate = "", sale, expenses = 0, saleCii = null, cessPct = 4, slabRatePct = 30 }) {
+  const C = Number(cost) || 0, I = Number(improvement) || 0, S = Number(sale) || 0, E = Number(expenses) || 0;
+  if (!buyDate || !sellDate || sellDate <= buyDate) return null;
+  const months = (Date.parse(sellDate) - Date.parse(buyDate)) / (864e5 * 30.4375);
+  const longTerm = months > 24;
+  const net = S - E;
+  const plain = net - C - I;
+  const out = { months: Math.floor(months), longTerm, net: r2(net), gainPlain: r2(plain) };
+  if (!longTerm) return { ...out, rate: Number(slabRatePct), tax: r2(Math.max(0, plain) * Number(slabRatePct) / 100 * (1 + cessPct / 100)), basis: "short" };
+  const tax125 = Math.max(0, plain) * 0.125 * (1 + cessPct / 100);
+  const res = { ...out, tax125: r2(tax125), tax: r2(tax125), basis: "12.5% without indexation" };
+  if (buyDate < "2024-07-23" && sellDate >= "2024-07-23") {
+    const by = Math.max(2001, fyOf(buyDate)), sy = fyOf(sellDate);
+    const ciiSale = Number(saleCii) || CII[sy] || CII[2025];
+    const ciiBuy = CII[by] || 100;
+    const ciiImp = improvementDate ? CII[Math.max(2001, fyOf(improvementDate))] || ciiBuy : ciiBuy;
+    const idxCost = (C * ciiSale) / ciiBuy + (I * ciiSale) / ciiImp;
+    const gainIdx = net - idxCost;
+    const tax20 = Math.max(0, gainIdx) * 0.2 * (1 + cessPct / 100);
+    Object.assign(res, { ciiBuy, ciiSale, indexedCost: r2(idxCost), gainIndexed: r2(gainIdx), tax20: r2(tax20) });
+    if (tax20 < tax125) Object.assign(res, { tax: r2(tax20), basis: "20% with indexation" });
+  }
+  return res;
+}
+
+// ---------- TDS on property payments (Income-tax Act, 2025 section 393; earlier 194-IA, 194-IB, 194-I, 194H) ----------
+export function propertyTds({ kind, amount, months = 1, rateOverride }) {
+  const A = Number(amount) || 0;
+  if (kind === "sale") { const due = A >= 50e5; const rate = rateOverride ?? 1; return { due, rate, tds: due ? r2((A * rate) / 100) : 0, note: due ? "Buyer deducts 1% of the whole price (or the stamp-duty value if higher) and files Form 26QB within 30 days of the month end." : "No TDS when the price is under ₹50 lakh." }; }
+  if (kind === "rent_individual") { const due = A > 50000; const rate = rateOverride ?? 2; const total = A * (Number(months) || 1); return { due, rate, tds: due ? r2((total * rate) / 100) : 0, note: due ? "Tenants (individuals/HUF not under audit) paying over ₹50,000 a month deduct 2%, once a year or at the end of the tenancy (Form 26QC)." : "No TDS at ₹50,000 a month or less." }; }
+  if (kind === "rent_business") { const due = A > 50000; const rate = rateOverride ?? 10; return { due, rate, tds: due ? r2((A * rate) / 100) : 0, note: due ? "Businesses deduct 10% on rent for land, buildings and furniture above ₹50,000 a month." : "No TDS at ₹50,000 a month or less." }; }
+  if (kind === "commission") { const due = A > 20000; const rate = rateOverride ?? 2; return { due, rate, tds: due ? r2((A * rate) / 100) : 0, note: due ? "Businesses paying commission or brokerage above ₹20,000 in a year deduct 2%." : "No TDS at ₹20,000 a year or less." }; }
+  return null;
+}
+
+// ---------- Brokerage with GST and co-broker split ----------
+export function commissionCalc({ basis = "percent", value, pct = 2, months = 1, gstPct = 18, coBrokerPct = 0, tdsPct = 2, payerDeductsTds = true }) {
+  const V = Number(value) || 0;
+  const commission = basis === "percent" ? (V * (Number(pct) || 0)) / 100 : basis === "months" ? V * (Number(months) || 0) : V;
+  const gst = (commission * (Number(gstPct) || 0)) / 100;
+  const tds = payerDeductsTds && commission > 20000 ? (commission * (Number(tdsPct) || 0)) / 100 : 0;
+  const coBroker = (commission * (Number(coBrokerPct) || 0)) / 100;
+  return { commission: r2(commission), gst: r2(gst), invoice: r2(commission + gst), tds: r2(tds), received: r2(commission + gst - tds), coBroker: r2(coBroker), ours: r2(commission - coBroker) };
+}
+
+// ---------- Rent or buy ----------
+export function rentVsBuy({ price, downPct = 20, ratePct = 8.5, years = 20, horizon = 10, rent, rentGrowthPct = 5, growthPct = 5, investPct = 7, feesPct = 9, upkeepPct = 0.5 }) {
+  const P = Number(price) || 0, H = Math.max(1, Math.round(Number(horizon) || 1));
+  const loan = P * (1 - (Number(downPct) || 0) / 100);
+  const n = Math.max(1, Math.round((Number(years) || 1) * 12));
+  const e = emi(loan, ratePct, n);
+  const r = (Number(ratePct) || 0) / 1200;
+  let bal = loan, rentM = Number(rent) || 0, renterPot = P - loan + (P * (Number(feesPct) || 0)) / 100, buyerCash = 0;
+  const im = (Number(investPct) || 0) / 1200;
+  for (let m = 1; m <= H * 12; m++) {
+    if (m <= n) { bal = Math.max(0, bal - (e - bal * r)); }
+    const buyerMonthly = (m <= n ? e : 0) + (P * (Number(upkeepPct) || 0)) / 1200;
+    renterPot = renterPot * (1 + im) + Math.max(0, buyerMonthly - rentM);
+    buyerCash = buyerCash * (1 + im) + Math.max(0, rentM - buyerMonthly);
+    if (m % 12 === 0) rentM *= 1 + (Number(rentGrowthPct) || 0) / 100;
+  }
+  const value = P * (1 + (Number(growthPct) || 0) / 100) ** H;
+  const buyer = value - bal + buyerCash, renter = renterPot;
+  return { emi: r2(e), loan: r2(loan), value: r2(value), balance: r2(bal), buyer: r2(buyer), renter: r2(renter), better: buyer >= renter ? "buy" : "rent", gap: r2(Math.abs(buyer - renter)) };
+}
