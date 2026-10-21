@@ -91,6 +91,11 @@ the Docker stack on a local port:
 2. `cp deploy/nginx-estates.conf /etc/nginx/sites-available/sellandiammanestates` (change the domain if needed),
    link it into `sites-enabled`, `nginx -t && systemctl reload nginx`.
 3. `certbot --nginx -d www.<domain> -d <domain> --redirect`.
+4. Check that plain http is sent to https: `curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" http://www.<domain>`
+   must print `301 https://www.<domain>/`. If it prints `200`, install the finished file instead:
+   `sudo tee /etc/nginx/sites-enabled/sellandiammanestates < deploy/nginx-estates-https.conf`, then
+   `nginx -t && systemctl reload nginx`. Updates never need the nginx file copied again (copying the first file over
+   the finished one removes HTTPS).
 
 The bare domain is redirected to `www` by the app. Visitors' real addresses reach the backend (Caddy trusts only the
 private Docker address nginx connects from), so rate limits and the audit log stay per visitor.
