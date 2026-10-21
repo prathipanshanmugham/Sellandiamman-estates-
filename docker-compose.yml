@@ -42,7 +42,9 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
-    ports: ["80:80", "443:443", "443:443/udp"]
+      # own server: the domain (Caddy does HTTPS). Behind nginx on a shared server: ":80" (see DEPLOYMENT.md)
+      SITE_ADDRESS: ${SITE_ADDRESS:-${DOMAIN}}
+    ports: ["${HTTP_BIND:-80}:80", "${HTTPS_BIND:-443}:443", "${HTTPS_BIND:-443}:443/udp"]
     # share the built index.html with the backend, which adds search-engine text to each page
     command: ["sh", "-c", "cp /srv/index.html /shell/index.html && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
     volumes: ["caddy_data:/data", "caddy_config:/config", "site_shell:/shell"]

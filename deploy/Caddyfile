@@ -1,11 +1,30 @@
-# Sellandiamman Estates – one address for the website, staff app, owner portal and API.
-# Caddy gets and renews the HTTPS certificate for {$DOMAIN} automatically (ports 80 and 443 must be open).
+# Sellandiamman Estates – one address for the website, staff app, owner and investor portals and API.
+# On its own server (SITE_ADDRESS = DOMAIN): Caddy gets and renews the HTTPS certificate itself (ports 80 and 443 open).
+# Behind nginx on a shared server (SITE_ADDRESS = :80): nginx handles HTTPS and passes requests here. See DEPLOYMENT.md.
 {
 	email {$ACME_EMAIL}
+	servers {
+		# nginx in front (shared server) reaches Caddy from a private Docker address; trust it to say who the visitor is,
+		# reading the forwarded addresses right to left so a visitor cannot fake theirs
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
 }
 
-{$DOMAIN} {
+# The backend sees the real visitor address (rate limits and the audit log use it)
+(backend) {
+	reverse_proxy backend:8001 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+{$SITE_ADDRESS} {
 	encode zstd gzip
+
+	# one address for search engines: the bare domain (or any other name) goes to https://DOMAIN
+	@elsewhere not host {$DOMAIN}
+	redir @elsewhere https://{$DOMAIN}{uri} permanent
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -19,27 +38,27 @@
 
 	# API, file links and dynamic SEO files go to the backend
 	handle /api/* {
-		reverse_proxy backend:8001
+		import backend
 	}
 	handle /s/* {
 		uri replace /s/ /api/share/ 1
-		reverse_proxy backend:8001
+		import backend
 	}
 	handle /robots.txt {
 		rewrite * /api/robots.txt
-		reverse_proxy backend:8001
+		import backend
 	}
 	handle /sitemap.xml {
 		rewrite * /api/sitemap.xml
-		reverse_proxy backend:8001
+		import backend
 	}
 	handle /llms.txt {
 		rewrite * /api/llms.txt
-		reverse_proxy backend:8001
+		import backend
 	}
 	handle /llms-full.txt {
 		rewrite * /api/llms-full.txt
-		reverse_proxy backend:8001
+		import backend
 	}
 
 	# Website pages: the backend adds the title, description, structured data (schema.org) and the page text to
@@ -54,6 +73,7 @@
 		rewrite * /api/seo/page
 		reverse_proxy backend:8001 {
 			header_up X-Original-URI {http.request.orig_uri}
+			header_up X-Forwarded-For {client_ip}
 			@unavailable status 503
 			handle_response @unavailable {
 				root * /srv

@@ -76,6 +76,20 @@ Open `https://www.yourdomain.in`, then `https://www.yourdomain.in/erp/login`.
 9. **Owners** and **Investors**: invite them to their portals from each record.
 10. Add properties, verify ownership, record the marketing authorisation, then publish.
 
+## Sharing a server that already runs nginx
+
+If other websites on the server already use nginx (ports 80 and 443 taken), let nginx handle HTTPS and pass this site to
+the Docker stack on a local port:
+
+1. Add to `.env`: `SITE_ADDRESS=:80`, `HTTP_BIND=127.0.0.1:8088`, `HTTPS_BIND=127.0.0.1:8443`, then
+   `docker compose up -d --build`.
+2. `cp deploy/nginx-estates.conf /etc/nginx/sites-available/sellandiammanestates` (change the domain if needed),
+   link it into `sites-enabled`, `nginx -t && systemctl reload nginx`.
+3. `certbot --nginx -d www.<domain> -d <domain> --redirect`.
+
+The bare domain is redirected to `www` by the app. Visitors' real addresses reach the backend (Caddy trusts only the
+private Docker address nginx connects from), so rate limits and the audit log stay per visitor.
+
 ## 5. Short-stay calendars (Airbnb, Booking.com, Agoda, MakeMyTrip…)
 
 For each home, under **Short stays → Homes & platforms**:
