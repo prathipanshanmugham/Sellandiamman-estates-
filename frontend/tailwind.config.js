@@ -15,6 +15,8 @@ module.exports = {
         sm: 'calc(var(--radius) - 4px)'
       },
       colors: {
+        // Brand colours sampled from the SA artwork (grey #9C9FA3, red #FD171B); ink is the darker grey for small text (AA).
+        brand: { DEFAULT: '#8A8D92', ink: '#5F6064', light: '#9C9FA3', wash: '#F3F4F5', red: '#E3161C', 'red-bright': '#FD171B' },
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         card: {

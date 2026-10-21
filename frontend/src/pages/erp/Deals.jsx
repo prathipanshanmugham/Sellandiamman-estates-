@@ -3,13 +3,14 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, fmtDateTime, inr, label, opts, openFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { PageHeader, DataTable, Badge, FormDialog, Section, Facts, useList, act } from "../../components/erp/kit";
+import { DocsPanel } from "./Documents";
 
 export function Deals() {
   const nav = useNavigate();
   const { can } = useAuth();
   const [open, setOpen] = useState(false);
   const { rows } = useList("/deals");
-  const { rows: props } = useList("/properties");
+  const { rows: props } = useList(can("properties") && can("deals", "w") ? "/properties" : "/branches");
   return (
     <div>
       <PageHeader title="Deals" sub="Sale, rental and commercial lease transactions. Revenue = commission only.">{can("deals", "w") && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-deal-btn">New deal</button>}</PageHeader>
@@ -59,7 +60,7 @@ export function DealDetail() {
     <div className="space-y-6" data-testid="deal-detail">
       <PageHeader title={d.title} sub={`${d.code} · ${label(d.deal_type)} · ${d.property_title}`}>
         <Badge v={d.stage} testid="deal-stage-badge" />
-        <button className="btn-line btn-sm" onClick={() => openFile(`/deals/${id}/summary.pdf`)} data-testid="deal-pdf-btn">Deal summary PDF</button>
+        <button className="btn-line btn-sm" onClick={() => openFile(`/deals/${id}/summary.pdf`, { name: `Deal summary ${d.code}` })} data-testid="deal-pdf-btn">Deal summary PDF</button>
         {w && open && <button className="btn-dark btn-sm" onClick={async () => { await act(() => api.post(`/deals/${id}/close`), "Deal closed"); load(); }} data-testid="close-deal-btn">Close deal (won)</button>}
         {w && open && <button className="btn-line btn-sm" onClick={() => setDlg("cancel")} data-testid="cancel-deal-btn">Cancel / dispute</button>}
         {(w || can("finance", "w")) && d.stage === "won" && !d.invoice && <button className="btn-dark btn-sm" onClick={async () => { await act(() => api.post(`/deals/${id}/invoice`), "Invoice generated"); load(); }} data-testid="generate-invoice-btn">Generate invoice</button>}
@@ -75,6 +76,7 @@ export function DealDetail() {
         <Section title="Document checklist">{d.checklist.map((it, i) => <label key={i} className="flex items-center gap-2 border-b border-slate-100 py-1.5 text-sm"><input type="checkbox" checked={it.done} disabled={!w || !open} onChange={async (e) => { const cl = d.checklist.map((x, j) => (j === i ? { ...x, done: e.target.checked } : x)); await act(() => api.patch(`/deals/${id}`, { checklist: cl })); load(); }} data-testid={`checklist-${i}`} />{it.item}</label>)}</Section>
         {d.approvals?.length > 0 && <Section title="Approvals">{d.approvals.map((a) => <p key={a.id} className="flex justify-between border-b border-slate-100 py-1.5 text-sm"><span>{a.summary}</span><Badge v={a.status} /></p>)}</Section>}
         <Section title="History">{d.history.map((h, i) => <p key={i} className="border-b border-slate-100 py-1 text-xs text-slate-600">{fmtDateTime(h.at)} · {h.by} · {h.event}</p>)}</Section>
+        <DocsPanel entityType="deal" entityId={d.id} title="Deal documents (tick “Buyer can see” to show one in the buyer's portal)" defaultType="agreement" />
       </div>
       <FormDialog open={dlg === "offer"} onClose={() => setDlg("")} title="Record offer" fields={[{ name: "party", label: "Offered by", required: true }, { name: "amount", label: d.deal_type === "sale" ? "Offer amount (₹)" : "Monthly rent (₹)", type: "number", required: true }, { name: "terms", label: "Terms", type: "textarea", full: true }]} initial={{ party: d.buyer_name }} onSubmit={async (v) => { await api.post(`/deals/${id}/offers`, v); load(); }} />
       <FormDialog open={dlg === "cancel"} onClose={() => setDlg("")} title="Cancel or dispute deal" initial={{ status: "cancelled" }} fields={[{ name: "status", label: "Status", type: "select", required: true, options: opts(["cancelled", "disputed"]) }, { name: "reason", label: "Reason", type: "textarea", required: true, full: true }]} onSubmit={async (v) => { await api.post(`/deals/${id}/cancel`, v); load(); }} />

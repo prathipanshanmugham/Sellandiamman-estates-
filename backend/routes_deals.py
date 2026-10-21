@@ -219,7 +219,8 @@ async def close_deal(did: str, user=Depends(require("deals", "w"))):
         raise HTTPException(409, "Deal is already closed")
     for s in c.get("splits", []):
         await post_ledger("commission_payable", "in", s["amount"], "deal", did,
-                          f"{s['kind']} commission payable to {s['party']} ({d['code']})", user, s["party"])
+                          f"{s['kind']} commission payable to {s['party']} ({d['code']})", user, s["party"],
+                          branch_id=d.get("branch_id"))
     closed_as = {"sale": "sold", "rent": "rented", "lease": "leased"}[d["deal_type"]]
     await db.properties.update_one({"id": d["property_id"]}, {"$set": {"status": "closed", "closed_as": closed_as,
                                                                        "updated_at": now_iso()}})
@@ -253,6 +254,7 @@ async def deal_invoice(did: str, user=Depends(require("deals", "r"))):
     from routes_finance import create_invoice_doc
     c = d["commission"]
     inv = await create_invoice_doc({"type": "brokerage", "customer_name": c["payer"], "deal_id": did,
+                                    "branch_id": d.get("branch_id"),
                                     "lines": [{"description": f"Brokerage commission – {d['property_title']} ({d['code']})",
                                                "qty": 1, "rate": c["gross"]}]}, user)
     return inv

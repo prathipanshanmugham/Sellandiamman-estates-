@@ -54,7 +54,10 @@ def test_shortstay_separation():
 
 def test_owner_statement():
     r = calc_owner_statement([{"amount": 16000, "fee_pct": 8}], [{"amount": 1200}])
-    assert r == {"rent_collected": 16000, "management_fee": 1280, "expenses": 1200, "net_payable": 13520}
+    assert r == {"rent_collected": 16000, "management_fee": 1280, "expenses": 1200, "charges_collected": 0, "net_payable": 13520}
+    # bills collected from the tenant for the owner (EB, water) are passed on in full; no fee is taken on them
+    r = calc_owner_statement([{"amount": 16000, "fee_pct": 8}], [{"amount": 1200}], [{"amount": 1850.5}])
+    assert r["charges_collected"] == 1850.5 and r["management_fee"] == 1280 and r["net_payable"] == 15370.5
 
 
 def test_property_workflow():

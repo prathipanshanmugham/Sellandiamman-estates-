@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@fontsource/outfit": "5.2.8",
+    "@fontsource/plus-jakarta-sans": "5.2.8",
     "@hookform/resolvers": "5.0.1",
     "@radix-ui/react-accordion": "1.2.8",
     "@radix-ui/react-alert-dialog": "1.1.11",
@@ -42,6 +44,7 @@
     "embla-carousel-react": "8.6.0",
     "framer-motion": "11.18.0",
     "input-otp": "1.4.2",
+    "leaflet": "1.9.4",
     "lodash": "4.18.1",
     "lucide-react": "0.516.0",
     "next-themes": "0.4.6",
@@ -63,7 +66,8 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "test": "craco test"
+    "test": "craco test",
+    "build:preview": "REACT_APP_DEMO=true PUBLIC_URL=. BUILD_PATH=../demo/build/site GENERATE_SOURCEMAP=false craco build"
   },
   "browserslist": {
     "production": [
@@ -80,8 +84,6 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "7.21.11",
     "@craco/craco": "7.1.0",
-    "@emergentbase/overlay": "https://assets.emergent.sh/npm/emergentbase-overlay-0.1.31.tgz",
-    "@emergentbase/visual-edits": "https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.13.tgz",
     "@eslint/js": "9.23.0",
     "@types/lodash": "4.17.24",
     "autoprefixer": "10.4.20",

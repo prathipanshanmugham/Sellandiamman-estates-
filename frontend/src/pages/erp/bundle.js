@@ -1,0 +1,27 @@
+// Everything the staff workspace needs, loaded as one chunk after sign-in.
+export { default as Security, ForcedSetup } from "./Security";
+export { default as Dashboard } from "./Dashboard";
+export { default as Calendar } from "./Calendar";
+export { default as Leads } from "./Leads";
+export { default as LeadDetail } from "./LeadDetail";
+export { default as Properties } from "./Properties";
+export { default as ErpProperty } from "./ErpProperty";
+export { default as Owners } from "./Owners";
+export { Deals, DealDetail } from "./Deals";
+export { default as Finance } from "./Finance";
+export { default as Leases } from "./Leases";
+export { Maintenance } from "./Ops";
+export { default as StayDesk } from "./StayDesk";
+export { default as Ceo } from "./Ceo";
+export { Customers, CustomerDetail } from "./Customers";
+export { AgreementsList, AgreementEditor } from "./Agreements";
+export { InvestorsHome, InvestorDetail, ProjectDetail } from "./Investors";
+export { default as WebsiteEditor } from "./WebsiteEditor";
+export { default as Team } from "./Team";
+export { default as Places } from "./Places";
+export { default as Tools } from "./Tools";
+export { default as Documents } from "./Documents";
+export { InsightsList, InsightEditor } from "./InsightsAdmin";
+export { Tasks, Approvals, Reports, Users, Settings, Audit } from "./Admin";
+export { Tickets, TicketDesk } from "./Tickets";
+export { default as Vault } from "./Vault";

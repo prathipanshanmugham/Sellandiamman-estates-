@@ -91,3 +91,12 @@ frontend/node_modules/.cache/default-development/1.pack
 credentials.json
 *.key
 .credentials
+
+# Sellandiamman Estates
+backend/uploads/
+frontend/build/
+backups/
+demo/build/
+# Example settings files carry no secrets and are part of the setup guide.
+!.env.example
+!**/.env.example

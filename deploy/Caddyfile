@@ -1,0 +1,126 @@
+# Sellandiamman Estates – one address for the website, staff app, owner and investor portals and API.
+# On its own server (SITE_ADDRESS = DOMAIN): Caddy gets and renews the HTTPS certificate itself (ports 80 and 443 open).
+# Behind nginx on a shared server (SITE_ADDRESS = :80): nginx handles HTTPS and passes requests here. See DEPLOYMENT.md.
+{
+	email {$ACME_EMAIL}
+	servers {
+		# nginx in front (shared server) reaches Caddy from a private Docker address; trust it to say who the visitor is,
+		# reading the forwarded addresses right to left so a visitor cannot fake theirs
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
+}
+
+# The backend sees the real visitor address (rate limits and the audit log use it)
+(backend) {
+	reverse_proxy backend:8001 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# one address for search engines: the bare domain (or any other name) goes to https://DOMAIN
+	@elsewhere not host {$DOMAIN}
+	redir @elsewhere https://{$DOMAIN}{uri} permanent
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(self)"
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; font-src 'self'; connect-src 'self'; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+		-Server
+	}
+
+	# API, file links and dynamic SEO files go to the backend
+	handle /api/* {
+		import backend
+	}
+	handle /s/* {
+		uri replace /s/ /api/share/ 1
+		import backend
+	}
+	handle /robots.txt {
+		rewrite * /api/robots.txt
+		import backend
+	}
+	handle /sitemap.xml {
+		rewrite * /api/sitemap.xml
+		import backend
+	}
+	handle /llms.txt {
+		rewrite * /api/llms.txt
+		import backend
+	}
+	handle /llms-full.txt {
+		rewrite * /api/llms-full.txt
+		import backend
+	}
+
+	# Website pages: the backend adds the title, description, structured data (schema.org) and the page text to
+	# index.html, so search engines and AI assistants that do not run JavaScript still read every page. If the
+	# backend is busy or down, the plain index.html is served and the app works as before.
+	@page {
+		method GET HEAD
+		not path /api/* /s/* /static/* /images/*
+		not path *.js *.css *.map *.json *.txt *.xml *.ico *.png *.jpg *.jpeg *.webp *.gif *.svg *.woff *.woff2 *.webmanifest *.pdf
+	}
+	handle @page {
+		rewrite * /api/seo/page
+		reverse_proxy backend:8001 {
+			header_up X-Original-URI {http.request.orig_uri}
+			header_up X-Forwarded-For {client_ip}
+			@unavailable status 503
+			handle_response @unavailable {
+				root * /srv
+				rewrite * /index.html
+				header Cache-Control "no-cache"
+				file_server {
+					status 200
+				}
+			}
+		}
+	}
+
+	# Built website: long cache for hashed files, no cache for index.html, and app routes fall back to index.html
+	handle {
+		root * /srv
+		@static path /static/*
+		header @static Cache-Control "public, max-age=31536000, immutable"
+		@html path / /index.html
+		header @html Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle_errors {
+		# only pages fall back to the app; API calls, file links and the robots / sitemap files keep their error
+		@backend_down expression `{err.status_code} in [502, 503, 504] && !{http.request.orig_uri.path}.startsWith("/api/") && !{http.request.orig_uri.path}.startsWith("/s/") && !({http.request.orig_uri.path} in ["/robots.txt", "/sitemap.xml", "/llms.txt", "/llms-full.txt"])`
+		handle @backend_down {
+			root * /srv
+			rewrite * /index.html
+			header Cache-Control "no-cache"
+			file_server {
+				status 200
+			}
+		}
+		respond "{err.status_code} {err.status_text}"
+	}
+
+	request_body {
+		max_size 25MB
+	}
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Redirect www <-> bare domain if you use both (uncomment and set):
+# www.example.com {
+# 	redir https://example.com{uri} permanent
+# }

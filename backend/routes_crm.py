@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from core import (db, now_iso, new_id, next_code, normalize_phone, require, can, scope, is_scoped, get_scoped,
-                  audit, notify, IST)
+                  audit, notify, IST, home_branch, check_branch, head_office_id, branch_for_place, branch_filter)
 from logic import LEAD_STAGES
 
 router = APIRouter()
@@ -27,6 +27,18 @@ async def add_activity(lead_id, kind, notes, user=None, extra=None):
                                          "created_at": now_iso(), **(extra or {})})
 
 
+async def branch_from_text(text):
+    """Branch for a lead from the places it mentions ("Thindal, Nasiyanur"), else the head office."""
+    if text:
+        words = [w.strip().lower() for w in re.split(r"[,/;&]| and ", text) if w.strip()]
+        rows = await db.locations.find({"active": {"$ne": False}}, {"_id": 0, "name": 1, "kind": 1, "branch_id": 1, "city": 1}).to_list(5000)
+        for kind in ("locality", "city"):
+            for r in rows:
+                if r["kind"] == kind and r["name"].lower() in words:
+                    return r.get("branch_id") or await branch_for_place(r.get("city"))
+    return await head_office_id()
+
+
 async def create_lead(data, user, note=None):
     """Returns (lead, is_duplicate). Duplicate open lead with same phone gets an activity instead."""
     dup = await db.leads.find_one({"phone": data["phone"], "stage": {"$nin": ["won", "lost"]}, "deleted": {"$ne": True}},
@@ -42,7 +54,16 @@ async def create_lead(data, user, note=None):
                                         "property_id", "assigned_to", "branch_id", "next_follow_up",
                                         "preferred_contact", "utm_source", "campaign_id")},
             "consent": {"marketing": bool(data.get("marketing_consent")), "recorded_at": now_iso()}}
+    if not lead.get("branch_id"):
+        lead["branch_id"] = await branch_from_text(lead.get("preferred_locations"))
     await db.leads.insert_one(dict(lead))
+    from routes_customers import link_customer, LEAD_TYPE
+    c = await link_customer("leads", lead["id"], {
+        "name": lead["name"], "phone": lead["phone"], "email": lead.get("email"), "organization": lead.get("organization"),
+        "types": [LEAD_TYPE.get(lead.get("customer_type"), "buyer")], "source": lead.get("source"),
+        "branch_id": lead["branch_id"], "rm_id": lead.get("assigned_to"), "preferred_contact": lead.get("preferred_contact"),
+        "marketing_consent": data.get("marketing_consent")}, user)
+    lead["customer_id"] = c and c["id"]
     await add_activity(lead["id"], "created", note or "Lead created", user)
     if lead.get("assigned_to"):
         await notify([lead["assigned_to"]], f"New lead assigned: {lead['name']}", lead.get("requirements") or "",
@@ -107,8 +128,9 @@ class VisitIn(BaseModel):
 
 
 class VisitPatch(BaseModel):
-    status: str = Field(pattern=r"^(scheduled|completed|cancelled|no_show)$")
+    status: str = Field(pattern=r"^(requested|scheduled|completed|cancelled|no_show)$")
     feedback: Optional[str] = None
+    scheduled_at: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 
 
 class ConvertIn(BaseModel):
@@ -150,8 +172,10 @@ async def new_lead(body: LeadIn, user=Depends(require("leads", "w"))):
     data["phone"] = normalize_phone(data["phone"])
     if is_scoped(user, "leads"):
         data["assigned_to"] = user["id"]
-    if not data.get("branch_id") and user.get("branch_ids"):
-        data["branch_id"] = user["branch_ids"][0]
+    if data.get("branch_id"):
+        check_branch(user, data["branch_id"])
+    else:
+        data["branch_id"] = home_branch(user) or await branch_from_text(data.get("preferred_locations"))
     existing = await db.leads.find_one({"phone": data["phone"], "stage": {"$nin": ["won", "lost"]},
                                         "deleted": {"$ne": True}}, {"_id": 0, "id": 1, "code": 1, "name": 1})
     if existing and not body.force:
@@ -217,6 +241,8 @@ async def patch_lead(lid: str, body: LeadPatch, user=Depends(require("leads", "w
     _validate(upd)
     if "assigned_to" in upd and is_scoped(user, "leads"):
         raise HTTPException(403, "Only managers can reassign leads")
+    if upd.get("branch_id"):
+        check_branch(user, upd["branch_id"])
     if "stage" in upd:
         if upd["stage"] not in LEAD_STAGES:
             raise HTTPException(422, "Invalid stage")
@@ -259,7 +285,7 @@ async def schedule_visit(lid: str, body: VisitIn, user=Depends(require("leads", 
     v = {"id": new_id(), "lead_id": lid, "lead_name": lead["name"], "property_id": prop["id"],
          "property_title": prop["title"], "property_code": prop["code"], "scheduled_at": body.scheduled_at,
          "status": "scheduled", "notes": body.notes, "agent_id": lead.get("assigned_to") or user["id"],
-         "created_at": now_iso()}
+         "branch_id": lead.get("branch_id"), "created_at": now_iso()}
     await db.site_visits.insert_one(dict(v))
     stages = LEAD_STAGES
     if stages.index(lead["stage"]) < stages.index("site_visit"):
@@ -274,6 +300,7 @@ async def schedule_visit(lid: str, body: VisitIn, user=Depends(require("leads", 
 @router.get("/site-visits")
 async def list_visits(user=Depends(require("leads", "r"))):
     f = {"agent_id": user["id"]} if is_scoped(user, "leads") else {}
+    f.update(branch_filter(user))
     return await db.site_visits.find(f, {"_id": 0}).sort("scheduled_at", -1).to_list(500)
 
 
@@ -282,11 +309,121 @@ async def update_visit(vid: str, body: VisitPatch, user=Depends(require("leads",
     v = await db.site_visits.find_one({"id": vid}, {"_id": 0})
     if not v:
         raise HTTPException(404, "Visit not found")
-    await get_scoped("leads", "leads", user, v["lead_id"])
-    await db.site_visits.update_one({"id": vid}, {"$set": {"status": body.status, "feedback": body.feedback,
-                                                           "updated_at": now_iso()}})
-    await add_activity(v["lead_id"], "site_visit", f"Visit {body.status}: {body.feedback or ''}", user)
-    return {**v, "status": body.status, "feedback": body.feedback}
+    lead = await get_scoped("leads", "leads", user, v["lead_id"])
+    upd = {"status": body.status, "feedback": body.feedback, "updated_at": now_iso()}
+    if body.status == "scheduled":
+        when = body.scheduled_at or v.get("scheduled_at")
+        if not when:
+            raise HTTPException(422, "Choose a date and time for the visit")
+        upd["scheduled_at"] = when
+        upd["agent_id"] = v.get("agent_id") or lead.get("assigned_to") or user["id"]
+        await notify([upd["agent_id"]], f"Site visit confirmed: {v['lead_name']}", f"{v['property_title']} at {when}",
+                     f"/erp/leads/{v['lead_id']}", dedupe=f"visit:{vid}:{when}")
+    await db.site_visits.update_one({"id": vid}, {"$set": upd})
+    note = f"Visit {body.status}" + (f" for {upd.get('scheduled_at')}" if body.status == "scheduled" else "")
+    await add_activity(v["lead_id"], "site_visit", f"{note}: {body.feedback or ''}".strip(": "), user)
+    return {**v, **upd}
+
+
+def _match_query(lead):
+    tx = {"buy": "sale", "rent": "rent", "lease": "lease", "short_stay": "short_stay", "commercial": "lease"}.get(
+        lead.get("interest"))
+    f = {"status": {"$in": ["published", "ready_to_market", "under_offer"]}, "deleted": {"$ne": True}}
+    if tx:
+        f["transaction"] = tx
+    if lead.get("budget_max"):
+        f["$or"] = [{"price": {"$lte": float(lead["budget_max"]) * 1.1}}, {"price_on_request": True},
+                    {"price": None}]
+    return f
+
+
+def _score(lead, p):
+    score, why = 0, []
+    locs = [x.strip().lower() for x in re.split(r"[,/;]", lead.get("preferred_locations") or "") if x.strip()]
+    hay = f"{p.get('locality', '')} {p.get('city', '')} {p.get('pincode', '')}".lower()
+    if locs and any(x in hay for x in locs):
+        score += 3
+        why.append("preferred location")
+    price = p.get("price")
+    bmin, bmax = lead.get("budget_min"), lead.get("budget_max")
+    if price and bmax and price <= bmax and (not bmin or price >= bmin):
+        score += 3
+        why.append("within budget")
+    elif price and bmax and price <= bmax * 1.1:
+        score += 1
+        why.append("just above budget")
+    req = (lead.get("requirements") or "").lower()
+    if p.get("bedrooms") and f"{p['bedrooms']} bhk" in req:
+        score += 2
+        why.append(f"{p['bedrooms']} BHK")
+    if p.get("category") and p["category"].replace("_", " ") in req:
+        score += 1
+        why.append(p["category"].replace("_", " "))
+    if p.get("status") == "published":
+        score += 1
+    return score, why
+
+
+@router.get("/leads/{lid}/matches")
+async def lead_matches(lid: str, user=Depends(require("leads", "r"))):
+    """Listings that fit a lead's interest, budget and preferred locations, best first."""
+    lead = await get_scoped("leads", "leads", user, lid)
+    if not can(user, "properties", "r"):
+        raise HTTPException(403, "You do not have permission for this action")
+    props = await db.properties.find({**_match_query(lead), **scope(user, "properties")},
+                                     {"_id": 0, "id": 1, "code": 1, "listing_id": 1, "title": 1, "locality": 1,
+                                      "city": 1, "pincode": 1, "price": 1, "price_unit": 1, "price_on_request": 1,
+                                      "bedrooms": 1, "category": 1, "transaction": 1, "status": 1, "images": 1,
+                                      "built_area": 1, "plot_area": 1, "area_unit": 1}).to_list(500)
+    out = []
+    for p in props:
+        s, why = _score(lead, p)
+        out.append({**p, "score": s, "reasons": why})
+    out.sort(key=lambda x: (-x["score"], x.get("price") or 0))
+    shared = {a.get("property_id") for a in await db.lead_activities.find(
+        {"lead_id": lid, "kind": "shared_listing"}, {"_id": 0, "property_id": 1}).to_list(500)}
+    for p in out:
+        p["shared"] = p["id"] in shared
+    return out[:20]
+
+
+@router.post("/leads/{lid}/share-listings")
+async def share_listings(lid: str, body: dict, user=Depends(require("leads", "w"))):
+    """Records which listings were sent to the customer (the message itself is sent from the user's WhatsApp)."""
+    lead = await get_scoped("leads", "leads", user, lid)
+    ids = [str(x) for x in (body.get("property_ids") or [])][:20]
+    props = await db.properties.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "code": 1, "listing_id": 1}).to_list(20)
+    for p in props:
+        await add_activity(lid, "shared_listing", f"Shared listing {p.get('listing_id') or p['code']}", user,
+                           {"property_id": p["id"]})
+    if props and lead["stage"] in ("new", "contacted", "qualified", "requirements"):
+        await db.leads.update_one({"id": lid}, {"$set": {"stage": "matched", "updated_at": now_iso()}})
+        await add_activity(lid, "stage_change", f"Stage: {lead['stage']} → matched", user)
+    return {"shared": len(props)}
+
+
+@router.post("/leads/{lid}/anonymise")
+async def anonymise_lead(lid: str, body: dict, user=Depends(require("leads", "a"))):
+    """Data-protection request: removes the person's identity from the lead and its history, keeps the numbers."""
+    lead = await get_scoped("leads", "leads", user, lid)
+    if not body.get("confirm"):
+        raise HTTPException(422, "Confirm that the customer asked for their data to be removed")
+    await anonymise_lead_record(lead, user, body.get("reason"))
+    return {"ok": True}
+
+
+async def anonymise_lead_record(lead, user, reason=None):
+    lid = lead["id"]
+    await db.leads.update_one({"id": lid}, {"$set": {
+        "name": "Anonymised contact", "phone": None, "email": None, "organization": None, "requirements": None,
+        "preferred_locations": None, "contacts": [], "utm_source": None, "anonymised": True,
+        "anonymised_at": now_iso(), "consent": {"marketing": False, "recorded_at": now_iso()},
+        "stage": lead["stage"] if lead["stage"] in ("won", "lost") else "lost",
+        "lost_reason": lead.get("lost_reason") or "data_removal_request", "updated_at": now_iso()}})
+    await db.lead_activities.update_many({"lead_id": lid}, {"$set": {"notes": "[removed on request]", "outcome": None}})
+    await db.site_visits.update_many({"lead_id": lid}, {"$set": {"lead_name": "Anonymised contact", "feedback": None,
+                                                                 "notes": None}})
+    await audit(user, "lead_anonymised", "leads", lid, {"code": lead["code"], "reason": reason})
 
 
 @router.post("/leads/{lid}/convert")

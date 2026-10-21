@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest==9.1.1
+pytest-xdist==3.8.0
+requests==2.34.2
+# Lets the test-suite run without a MongoDB server (MONGO_URL=mongomock://). Never used in production.
+mongomock==4.3.0
+mongomock-motor==0.0.36
