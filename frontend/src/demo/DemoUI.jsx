@@ -13,7 +13,7 @@ import { agreementFor, agreementBlocks, stampLine } from "./routes_agreements";
 import { Paper } from "../pages/erp/Agreements";
 
 const D = "@demo.sellandiamman.test";
-const ROLES = [["admin", "Super admin", "Everything, incl. users and settings"], ["director", "Director (CEO)", "All branches, CEO dashboard, approvals"], ["perundurai.manager", "Head office manager", "Perundurai branch only"], ["branch.manager", "Branch manager", "Erode branch: leads, listings, leases, stays"], ["namakkal.manager", "Namakkal manager", "Namakkal branch only"], ["sales.agent", "Sales agent", "Own leads, deals and listings"], ["property.manager", "Property manager", "Leases, rent, maintenance"], ["accountant", "Accountant", "Invoices, ledgers, payouts"], ["marketing", "Marketing", "Listings, Insights, campaigns"], ["shortstay.ops", "Short-stay ops", "Bookings and cleaning"], ["auditor", "Auditor", "Read-only, reports, audit log"], ["owner", "Owner portal", "Meena Krishnan, a property owner"], ["investor", "Investor portal", "Suresh Palanisamy, a co-investor"]];
+const ROLES = [["admin", "Super admin", "Everything, incl. users and settings"], ["director", "Director (CEO)", "All branches, CEO dashboard, approvals"], ["perundurai.manager", "Head office manager", "Perundurai branch only"], ["branch.manager", "Branch manager", "Erode branch: leads, listings, leases, stays"], ["namakkal.manager", "Namakkal manager", "Namakkal branch only"], ["sales.agent", "Sales agent", "Own leads, deals and listings"], ["property.manager", "Property manager", "Leases, rent, maintenance"], ["accountant", "Accountant", "Invoices, ledgers, payouts"], ["marketing", "Marketing", "Listings, Insights, campaigns"], ["shortstay.ops", "Short-stay ops", "Bookings and cleaning"], ["auditor", "Auditor", "Read-only, reports, audit log"], ["owner", "Owner / lessor portal", "Meena Krishnan, a property owner"], ["tenant", "Tenant portal", "Ramesh & Anu Kannan: rent, EB bills, requests"], ["buyer", "Buyer portal", "Arvind Subramanian, buying a house"], ["investor", "Investor portal", "Suresh Palanisamy, a co-investor"]];
 
 function sampleFor(path) {
   const kinds = [[/^\/investors?\/.*statement/, "investor-statement-"], [/^\/agreements\//, "agreement-"], [/^\/ceo\/report/, "ceo-report"], [/^\/team\/org/, "org-chart"], [/^\/invoices\//, "invoice-"], [/^\/payments\//, "receipt-"], [/^\/deals\//, "deal-"], [/rent-receipts|rent-payments/, "rent-"], [/bill-receipts|charge-payments/, "billreceipt-"], [/statement/, "statement-"], [/brochure/, "brochure-"]];
@@ -90,7 +90,7 @@ function Switcher() {
       if (user) await api.post("/auth/logout").catch(() => {});
       const { data } = await api.post("/auth/login", { email: `${key}${D}`, password: "Demo@12345" });
       if (data.mfa_required) { setOpen(false); nav("/erp/login"); return; }
-      await refresh(); setOpen(false); nav({ owner: "/owner", investor: "/investor" }[key] || "/erp");
+      await refresh(); setOpen(false); nav({ owner: "/owner", investor: "/investor", tenant: "/tenant", buyer: "/buyer" }[key] || "/erp");
     } catch (e) { setErr(errMsg(e)); }
   };
   return (
