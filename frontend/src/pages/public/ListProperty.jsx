@@ -47,11 +47,11 @@ export default function ListProperty() {
       <div><p className="eyebrow">For owners</p><h1 className="mt-2 font-heading text-4xl font-semibold">List your property</h1>
         <p className="mt-5 text-slate-600">Tell us about your property. Every submission is reviewed by our team. We verify ownership and agree terms in writing before any listing goes live.</p>
         <ol className="mt-8 space-y-4 text-sm text-slate-700">{["Submit details and photos", "We call you to understand your goals", "Ownership verification and written authorisation", "Professional listing and marketing"].map((s, i) => <li key={s} className="flex gap-3"><span className="font-mono text-slate-400">0{i + 1}</span>{s}</li>)}</ol></div>
-      <form onSubmit={submit} noValidate className="space-y-5 border border-slate-200 p-5 sm:p-8" data-testid="owner-submission-form">
+      <form onSubmit={submit} noValidate className="min-w-0 space-y-5 border border-slate-200 p-5 sm:p-8" data-testid="owner-submission-form">
         <input type="text" className="hidden" tabIndex={-1} value={f.website} onChange={set("website")} aria-hidden="true" />
         <div className="grid gap-4 sm:grid-cols-2">{inp("name", "Owner name", { required: true })}{inp("phone", "Mobile number", { required: true, inputMode: "tel" })}{inp("email", "Email (optional)", { type: "email" })}
           <div><label className="lbl">Preferred contact</label><select className="inp" value={f.preferred_contact} onChange={set("preferred_contact")} data-testid="owner-contact-select"><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option></select></div></div>
-        <fieldset className="border-t border-slate-100 pt-4"><legend className="sr-only">Where is the property?</legend>
+        <fieldset className="min-w-0 border-t border-slate-100 pt-4"><legend className="sr-only">Where is the property?</legend>
           <LocationPicker value={where} onChange={setWhere} towns={towns} testid="owner-location" note="Optional but helpful: at the property, tap “Use my current location”. The website only ever shows an approximate point; the exact spot and address stay with our team." />
         </fieldset>
         <div><label className="lbl">Full address (kept private)</label><textarea className="inp" rows={2} value={f.address} onChange={set("address")} data-testid="owner-address-input" /></div>
@@ -63,7 +63,7 @@ export default function ListProperty() {
         <div><label className="lbl">Description</label><textarea className="inp" rows={4} value={f.description} onChange={set("description")} data-testid="owner-description-input" /></div>
         <fieldset><legend className="lbl">Services of interest</legend><div className="grid gap-2 sm:grid-cols-2">{SERVICES.map((s) => <label key={s} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={services.includes(s)} onChange={(e) => setServices(e.target.checked ? [...services, s] : services.filter((x) => x !== s))} />{s}</label>)}</div></fieldset>
         <div><label className="lbl">Photos (up to 6, JPG/PNG/WebP, 5 MB each)</label><input type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(e) => setPhotos([...e.target.files])} className="text-sm" data-testid="owner-photos-input" /></div>
-        <label className="flex items-start gap-2 text-sm text-slate-700"><input type="checkbox" checked={f.declaration} onChange={set("declaration")} className="mt-1" data-testid="owner-declaration-checkbox" />I confirm I am the owner of this property or am authorised by the owner to submit it, and I accept the <Link to="/legal/privacy" className="underline">privacy policy</Link>.</label>
+        <label className="flex items-start gap-2 text-sm text-slate-700"><input type="checkbox" checked={f.declaration} onChange={set("declaration")} className="mt-1" data-testid="owner-declaration-checkbox" /><span>I confirm I am the owner of this property or am authorised by the owner to submit it, and I accept the <Link to="/legal/privacy" className="underline">privacy policy</Link>.</span></label>
         <Turnstile siteKey={site.turnstile_site_key} onToken={setToken} />
         {st.error && <p className="text-sm text-red-700" role="alert" data-testid="owner-submission-error">{st.error}</p>}
         <button className="btn-dark w-full" disabled={st.loading} data-testid="owner-submit-btn">{st.loading ? "Submitting…" : "Submit for review"}</button>

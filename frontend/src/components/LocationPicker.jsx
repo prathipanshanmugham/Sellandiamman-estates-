@@ -71,7 +71,7 @@ export default function LocationPicker({ value, onChange, towns = [], allowNewTo
   };
 
   return (
-    <div className="space-y-3" data-testid={testid}>
+    <div className="min-w-0 space-y-3" data-testid={testid}>
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
           <label className="lbl" htmlFor={`${testid}-town`}>Town / city *</label>

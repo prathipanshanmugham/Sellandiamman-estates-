@@ -16,15 +16,15 @@ const NAV = [
 ];
 
 // Staff who work across branches choose one to narrow every list, total and report; "All" shows everything they may see.
-function BranchPicker({ user }) {
+function BranchPicker({ user, className = "" }) {
   const pick = useBranchPick();
   const [branches, setBranches] = useState([]);
   useEffect(() => { cachedGet("/branches").then(setBranches).catch(() => {}); }, []);
   const mine = user.all_branches ? branches : branches.filter((b) => (user.branch_ids || []).includes(b.id));
   useEffect(() => { if (pick && branches.length && !mine.some((b) => b.id === pick)) branchApi.set(""); }, [branches.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (mine.length < 2) return mine.length === 1 ? <span className="hidden px-2 text-xs text-slate-500 sm:inline" data-testid="branch-name">{mine[0].name} branch</span> : null;
+  if (mine.length < 2) return mine.length === 1 ? <span className={`px-2 text-xs text-slate-500 ${className}`} data-testid="branch-name">{mine[0].name} branch</span> : null;
   return (
-    <select className="max-w-[9.5rem] border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 sm:max-w-none" value={pick} onChange={(e) => branchApi.set(e.target.value)} aria-label="Branch" data-testid="branch-picker">
+    <select className={`border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 ${className}`} value={pick} onChange={(e) => branchApi.set(e.target.value)} aria-label="Branch" data-testid="branch-picker">
       <option value="">{user.all_branches ? "All branches" : "All my branches"}</option>
       {mine.map((b) => <option key={b.id} value={b.id}>{b.name}{b.is_head_office ? " (HO)" : ""}</option>)}
     </select>
@@ -60,6 +60,7 @@ export default function ErpLayout() {
   const side = (
     <nav className="flex h-full flex-col bg-slate-900 text-slate-300" aria-label="Staff menu">
       <div className="flex items-center justify-between border-b border-slate-800 px-5 py-5"><Link to="/erp" aria-label="Dashboard"><Logo tone="dark" size="sm" /></Link><button className="p-1 text-slate-400 lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
+      <div className="px-5 pt-3 lg:hidden"><BranchPicker user={user} className="w-full !border-slate-700 !bg-slate-800 !text-slate-200" /></div>
       <div className="flex-1 overflow-y-auto py-2">
         {groups.map(([g, items]) => <div key={g} className="py-2"><p className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{g}</p>
           {items.map(([to, l, Icon]) => <NavLink key={to} to={to} end={to === "/erp"} data-testid={`erp-nav-${l.split(" ")[0].toLowerCase()}`} className={({ isActive }) => `flex items-center gap-3 px-5 py-2 text-sm transition-colors ${isActive ? "bg-slate-800 text-white" : "hover:bg-slate-800/60 hover:text-white"}`}><Icon size={16} />{l}</NavLink>)}
@@ -80,7 +81,7 @@ export default function ErpLayout() {
           <div className="flex items-center gap-2"><button className="p-2 lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu" data-testid="erp-menu-toggle"><Menu size={20} /></button><span className="lg:hidden"><Logo size="sm" /></span></div>
           <span className="hidden text-xs text-slate-400 xl:block">Sellandiamman Estates · staff workspace · times in IST</span>
           <div className="flex items-center gap-0.5">
-            <BranchPicker user={user} />
+            <BranchPicker user={user} className="hidden sm:block" />
             <Notifications />
             <Link to="/erp/security" className="p-2 text-slate-600 hover:text-slate-900" aria-label="Password & 2-step sign-in" data-testid="change-password-link"><KeyRound size={18} /></Link>
             <button className="flex items-center gap-1 p-2 text-sm text-slate-600 hover:text-slate-900" onClick={async () => { await logout(); nav("/erp/login"); }} data-testid="logout-btn" aria-label="Sign out"><LogOut size={16} /><span className="hidden sm:inline">Sign out</span></button>

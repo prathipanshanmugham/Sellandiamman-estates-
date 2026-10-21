@@ -105,9 +105,16 @@ async def gather(sc, frm, to, data=None):
     visits = [v for v in data["site_visits"] if sc.ok(v)]
 
     brokerage = sum(d.get("final_commission") or 0 for d in deals if d["stage"] == "won" and _in(d.get("closed_at"), frm, to))
+    def net_of_gst(p):
+        i = inv_map[p["invoice_id"]]
+        return p["amount"] * (i.get("subtotal") or i.get("total") or 0) / i["total"] if i.get("total") else p["amount"]
+    # brokerage billed without a deal record (e.g. older deals entered straight in Finance) counts when it is paid
+    if not sc.located:
+        brokerage += sum(net_of_gst(p) for p in payments if p["invoice_id"] in inv_map and inv_map[p["invoice_id"]]["type"] == "brokerage"
+                         and not inv_map[p["invoice_id"]].get("deal_id"))
     management = sum(r["amount"] * float(r.get("mgmt_fee_pct") or 0) / 100 for r in rents)
     shortstay = sum(b.get("management_fee") or 0 for b in bookings if b["status"] in ("completed", "checked_in") and _in(b["check_out"], frm, to))
-    other = 0.0 if sc.located else sum(p["amount"] for p in payments if p["invoice_id"] in inv_map and inv_map[p["invoice_id"]]["type"] in ("marketing", "other"))
+    other = 0.0 if sc.located else sum(net_of_gst(p) for p in payments if p["invoice_id"] in inv_map and inv_map[p["invoice_id"]]["type"] in ("marketing", "other"))
     revenue = r2(brokerage + management + shortstay + other)
     wo_company = sum(w.get("actual_cost") or 0 for w in wos if w.get("charge_to") == "company" and _in(w.get("completed_at"), frm, to))
     expense_total = r2(sum(e["amount"] for e in expenses) + wo_company)
@@ -197,7 +204,7 @@ def pct(a, b):
 def growth(cur, prev):
     if prev in (None, 0):
         return 100.0 if cur else None
-    return round((cur - prev) / prev * 100, 1)
+    return round(max(-100.0, min(999.0, (cur - prev) / prev * 100)), 1)
 
 
 def metrics(cur, prev, comp, targets_month=None, days=30):

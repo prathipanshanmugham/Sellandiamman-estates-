@@ -206,7 +206,7 @@ async def resolve(path, query, base):
                 f"<p>{E(p.get('description_public'))}</p><h2>Key details</h2><dl>" +
                 "".join(f"<dt>{E(k)}</dt><dd>{E(v)}</dd>" for k, v in facts if v) + "</dl>" +
                 (f"<h2>Features</h2><ul>{''.join(f'<li>{E(a)}</li>' for a in p.get('amenities') or [])}</ul>" if p.get("amenities") else "") +
-                "".join(f'<img src="{E(u)}" alt="{E(p["title"])} photo {i + 1}" width="640" loading="lazy">' for i, u in enumerate(imgs[:3])) +
+                "".join(f'<img src="{E(u)}" alt="{E(p["title"])} photo {i + 1}" width="640" loading="lazy">' for i, u in enumerate((p.get("images") or [])[:3])) +
                 f"<p>Listed by {E(name)}. Call {E(s.get('phone'))} or enquire on this page. Details are provided by the owner and subject to verification.</p>" +
                 (f"<h2>Similar properties in {E(p['city'])}</h2><ul>{''.join(card(x) for x in sim)}</ul>" if sim else ""))
         ld += [listing, crumbs(base, [("Home", "/"), (p["city"], f"/properties-in/{slug(p['city'])}"), (p["title"], path)])]

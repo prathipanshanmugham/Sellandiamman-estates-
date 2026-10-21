@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Phone, MessageCircle, Mail, FileDown, Search, Building2 } from "lucide-react";
 import { api, openFile, telLink, waLink, label, useDebounced } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
@@ -26,7 +26,7 @@ function Node({ p, kids, branchName, highlight }) {
   const children = kids[p.id] || [];
   return (
     <li>
-      <div className={`org-card inline-flex w-48 flex-col items-center border bg-white p-3 text-center shadow-sm ${highlight === p.id ? "border-slate-900 ring-2 ring-slate-900" : "border-slate-200"}`} data-testid={`org-node-${p.id}`}>
+      <div className={`org-card inline-flex w-44 flex-col items-center border bg-white p-3 text-center shadow-sm ${highlight === p.id ? "border-slate-900 ring-2 ring-slate-900" : "border-slate-200"}`} data-testid={`org-node-${p.id}`}>
         <Avatar p={p} />
         <p className="mt-2 text-sm font-semibold leading-tight text-slate-900">{p.name}</p>
         <p className="text-[11px] leading-tight text-slate-600">{p.designation || p.role_label}</p>
@@ -56,8 +56,11 @@ export default function Team() {
   const [q, setQ] = useState("");
   const [me, setMe] = useState(null);
   const dq = useDebounced(q, 200);
+  const chartBox = useRef(null);
   const load = () => api.get("/team/org").then((r) => setD(r.data)).catch(() => setD(false));
   useEffect(() => { load(); }, []);
+  // a wide chart opens centred on the top of the tree
+  useEffect(() => { const el = chartBox.current; if (el && view === "chart") el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; }, [d, view]);
   const people = useMemo(() => d?.people || [], [d]);
   const bmap = useMemo(() => Object.fromEntries((d?.branches || []).map((b) => [b.id, b])), [d]);
   const branchName = (p) => (p.branch_ids?.length ? p.branch_ids.map((b) => bmap[b]?.name || "").join(", ") : "All branches");
@@ -78,7 +81,7 @@ export default function Team() {
         {[["chart", "Chart"], ["directory", "Directory"], ["branches", "By branch"]].map(([k, l]) => <button key={k} className={`chip ${view === k ? "chip-on" : ""}`} onClick={() => setView(k)} data-testid={`team-view-${k}`}>{l}</button>)}
         <span className="relative ml-auto"><Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" /><input className="inp !pl-8 sm:!w-64" placeholder="Find a person" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a person" /></span>
       </div>
-      {view === "chart" && <div className="panel overflow-x-auto p-4" data-testid="org-chart"><div className="org-tree min-w-max"><ul>{roots.map((r) => <Node key={r.id} p={r} kids={kids} branchName={branchName} highlight={match?.id} />)}</ul></div></div>}
+      {view === "chart" && <div ref={chartBox} className="panel overflow-x-auto p-4" data-testid="org-chart"><div className="org-tree min-w-max"><ul>{roots.map((r) => <Node key={r.id} p={r} kids={kids} branchName={branchName} highlight={match?.id} />)}</ul></div></div>}
       {view === "directory" && <DataTable testid="team-directory" rows={filtered} columns={[{ key: "name", label: "Name", render: (p) => <span className="flex items-center gap-2"><Avatar p={p} size={28} /><span><span className="font-medium">{p.name}</span><span className="block text-xs text-slate-500">{p.designation || p.role_label}</span></span></span> }, { key: "department", label: "Team", render: (p) => p.department || label(p.role) }, { key: "branch", label: "Branch", render: branchName }, { key: "reports_to", label: "Reports to", render: (p) => people.find((x) => x.id === p.reports_to)?.name || "-" }, { key: "phone", label: "Phone", render: (p) => p.phone || "-" }, { key: "email", label: "Email", render: (p) => <span className="break-all">{p.email}</span> }, { key: "x", label: "", render: (p) => <Contacts p={p} small /> }]} />}
       {view === "branches" && <div className="grid gap-4 lg:grid-cols-2" data-testid="team-branches">
         {d.branches.map((b) => { const staff = filtered.filter((p) => p.branch_ids?.includes(b.id)); const mgr = people.find((p) => p.id === b.manager_id); return (

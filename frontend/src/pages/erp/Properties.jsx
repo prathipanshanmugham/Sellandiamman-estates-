@@ -51,7 +51,7 @@ export const geoInitial = (p) => ({ lat: p.geo?.lat ?? null, lng: p.geo?.lng ?? 
 export function PropLocation({ v, set }) {
   const towns = useCached("/locations", []);
   return (
-    <fieldset className="border-t border-slate-100 pt-4"><legend className="lbl">Location</legend>
+    <fieldset className="min-w-0 border-t border-slate-100 pt-4"><legend className="lbl">Location</legend>
       <LocationPicker value={v} onChange={(x) => set(x)} towns={towns} testid="prop-location" note="Add a new town or locality by typing it; it joins the list for everyone. The exact pin stays internal; the website shows the point you choose above." />
     </fieldset>
   );

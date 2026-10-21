@@ -6,8 +6,9 @@ import { api, errMsg, inr, n0, openFile, todayIST, useBranchPick, cachedGet } fr
 import { useAuth } from "../../lib/auth";
 import { PageHeader, Section, Kpi, DataTable } from "../../components/erp/kit";
 
-const TONE = { healthy: ["#047857", "bg-emerald-50 text-emerald-800 border-emerald-200"], watch: ["#b45309", "bg-amber-50 text-amber-800 border-amber-200"], critical: ["#b91c1c", "bg-red-50 text-red-800 border-red-200"], none: ["#94a3b8", "bg-slate-50 text-slate-600 border-slate-200"] };
-const STATUS_TEXT = { healthy: "Healthy", watch: "Needs attention", critical: "Act now", none: "No data" };
+const TONES = { healthy: ["#047857", "bg-emerald-50 text-emerald-800 border-emerald-200"], attention: ["#b45309", "bg-amber-50 text-amber-800 border-amber-200"], critical: ["#b91c1c", "bg-red-50 text-red-800 border-red-200"], no_data: ["#94a3b8", "bg-slate-50 text-slate-600 border-slate-200"] };
+const TONE = new Proxy(TONES, { get: (t, k) => t[k] || t.no_data });
+const STATUS_TEXT = { healthy: "Healthy", attention: "Needs attention", critical: "Act now", no_data: "No data" };
 const iso = (d) => d.toISOString().slice(0, 10);
 
 function presets() {
@@ -89,7 +90,7 @@ export default function Ceo() {
           <section className="panel flex flex-col items-center p-6 text-center" data-testid="health-score">
             <p className="eyebrow">Company health score</p>
             <Gauge score={d.score} status={d.status} />
-            <p className="font-heading text-2xl font-semibold">Grade {d.grade || "–"} <span className={`ml-1 border px-2 py-0.5 align-middle text-xs font-semibold uppercase ${TONE[d.status || "none"][1]}`}>{STATUS_TEXT[d.status || "none"]}</span></p>
+            <p className="font-heading text-2xl font-semibold">Grade {d.grade || "–"} <span className={`ml-1 border px-2 py-0.5 align-middle text-xs font-semibold uppercase ${TONE[d.status || "none"][1]}`}>{STATUS_TEXT[d.status] || "No data"}</span></p>
             {d.prev_score != null && d.score != null && <p className={`mt-2 text-sm ${d.score >= d.prev_score ? "text-emerald-700" : "text-red-700"}`}>{d.score >= d.prev_score ? "▲" : "▼"} {Math.abs(d.score - d.prev_score).toFixed(1)} points vs the previous {d.period.days} days ({d.prev_score})</p>}
             <p className="mt-3 text-xs text-slate-500">Weighted from six parts. Parts without data in this period are left out and the rest re-weighted.</p>
           </section>

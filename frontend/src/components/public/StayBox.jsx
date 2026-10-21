@@ -91,7 +91,7 @@ export default function StayBox({ p, siteKey }) {
         <div><label className="lbl" htmlFor="sr-guests">Guests</label><input id="sr-guests" type="number" min="1" max={av.max_guests || 20} className="inp" value={f.guests} onChange={set("guests")} data-testid="stay-guests" /></div>
         <div className="col-span-2"><label className="lbl" htmlFor="sr-msg">Message (optional)</label><textarea id="sr-msg" rows={2} className="inp" value={f.message} onChange={set("message")} /></div>
       </div>
-      <label className="flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" className="mt-0.5" checked={f.consent} onChange={set("consent")} data-testid="stay-consent" />I agree to be contacted about this booking and accept the <Link to="/legal/privacy" className="underline">privacy policy</Link>.</label>
+      <label className="flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" className="mt-0.5" checked={f.consent} onChange={set("consent")} data-testid="stay-consent" /><span>I agree to be contacted about this booking and accept the <Link to="/legal/privacy" className="underline">privacy policy</Link>.</span></label>
       <Turnstile siteKey={siteKey} onToken={setToken} />
       {st.error && <p className="text-sm text-red-700" role="alert" data-testid="stay-error">{st.error}</p>}
       <button className="btn-dark w-full" disabled={st.busy} data-testid="stay-submit">{st.busy ? "Sending…" : "Request these dates"}</button>
