@@ -13,7 +13,7 @@ export function resetDb() {
     "credit_notes", "ledger_entries", "leases", "rent_payments", "deposit_movements", "owner_statements", "work_orders", "vendors",
     "bookings", "tasks", "approvals", "expenses", "posts", "documents", "campaigns", "notifications", "audit_logs", "counters", "verifications",
     "customers", "locations", "stay_channels", "stay_blocks", "investors", "inv_projects", "investments", "distributions", "agreements",
-    "site_content", "site_versions", "lead_activities"]
+    "site_content", "site_versions", "lead_activities", "tickets", "lease_charges", "charge_payments", "payment_notices", "vault_items", "vault_history"]
     .forEach((c) => { if (!db[c]) db[c] = []; });
 }
 resetDb();
@@ -59,22 +59,24 @@ export function normalizePhone(raw) {
 export const settings = () => db.settings.find((s) => s.id === "company") || {};
 
 // ---------- Roles & permissions (backend/core.py) ----------
-export const ROLES = { super_admin: "Super Administrator", director: "Owner / Director", branch_manager: "Branch / Operations Manager", sales_agent: "Sales / Brokerage Agent", property_manager: "Property Manager", accountant: "Finance / Accountant", marketing: "Marketing Staff", shortstay_ops: "Short-Stay Operations", auditor: "Read-Only Auditor", owner: "Property Owner (portal)", investor: "Investor (portal)" };
-export const PORTAL_ROLES = ["owner", "investor"];
-const MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases", "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users", "settings", "audit"];
+export const ROLES = { super_admin: "Super Administrator", director: "Owner / Director", branch_manager: "Branch / Operations Manager", sales_agent: "Sales / Brokerage Agent", property_manager: "Property Manager", accountant: "Finance / Accountant", marketing: "Marketing Staff", shortstay_ops: "Short-Stay Operations", auditor: "Read-Only Auditor", owner: "Owner / Lessor (portal)", investor: "Investor (portal)", tenant: "Tenant (portal)", buyer: "Buyer / Client (portal)" };
+export const PORTAL_ROLES = ["owner", "investor", "tenant", "buyer"];
+const MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases", "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users", "settings", "audit", "vault"];
 const all = (p) => Object.fromEntries(MODULES.map((m) => [m, p]));
 export const PERMS = {
   super_admin: all("rwaep"),
-  director: { ...all("rwae"), users: "r", settings: "r", properties: "rwaep", cms: "rwp" },
-  branch_manager: { dashboard: "r", ceo: "re", leads: "rwe", customers: "rwe", properties: "rwaep", owners: "rw", deals: "rwe", finance: "r", leases: "rw", maintenance: "rw", shortstay: "rw", documents: "rw", agreements: "rw", tasks: "rw", reports: "re", cms: "rwp", users: "r" },
-  sales_agent: { dashboard: "r", leads: "rw", customers: "rw", properties: "rw", owners: "r", deals: "rw", tasks: "rw", documents: "rw", agreements: "rw" },
-  property_manager: { dashboard: "r", properties: "r", owners: "r", customers: "r", leases: "rw", maintenance: "rw", documents: "rw", agreements: "rw", tasks: "rw" },
-  accountant: { dashboard: "r", ceo: "re", finance: "rwe", deals: "r", leases: "r", shortstay: "r", owners: "r", customers: "r", investors: "rwe", agreements: "r", reports: "re", tasks: "rw", maintenance: "r" },
-  marketing: { dashboard: "r", properties: "rp", cms: "rwp", leads: "r", tasks: "rw" },
-  shortstay_ops: { dashboard: "r", shortstay: "rw", maintenance: "rw", properties: "r", tasks: "rw", documents: "r" },
+  director: { ...all("rwae"), users: "r", settings: "r", properties: "rwaep", cms: "rwp", vault: "rwa" },
+  branch_manager: { dashboard: "r", ceo: "re", leads: "rwe", customers: "rwe", properties: "rwaep", owners: "rw", deals: "rwe", finance: "r", leases: "rw", maintenance: "rw", shortstay: "rw", documents: "rw", agreements: "rw", tasks: "rw", reports: "re", cms: "rwp", users: "r", vault: "rw" },
+  sales_agent: { dashboard: "r", leads: "rw", customers: "rw", properties: "rw", owners: "r", deals: "rw", tasks: "rw", documents: "rw", agreements: "rw", vault: "r" },
+  property_manager: { dashboard: "r", properties: "r", owners: "r", customers: "r", leases: "rw", maintenance: "rw", documents: "rw", agreements: "rw", tasks: "rw", vault: "r" },
+  accountant: { dashboard: "r", ceo: "re", finance: "rwe", deals: "r", leases: "r", shortstay: "r", owners: "r", customers: "r", investors: "rwe", agreements: "r", reports: "re", tasks: "rw", maintenance: "r", vault: "rw" },
+  marketing: { dashboard: "r", properties: "rp", cms: "rwp", leads: "r", tasks: "rw", vault: "rw" },
+  shortstay_ops: { dashboard: "r", shortstay: "rw", maintenance: "rw", properties: "r", tasks: "rw", documents: "r", vault: "rw" },
   auditor: { dashboard: "r", ceo: "re", leads: "r", customers: "r", properties: "r", owners: "r", deals: "r", finance: "r", leases: "r", maintenance: "r", shortstay: "r", investors: "r", agreements: "r", reports: "re", audit: "r" },
   owner: {},
   investor: {},
+  tenant: {},
+  buyer: {},
 };
 const OWN_SCOPE = { sales_agent: { leads: "assigned_to", deals: "assigned_to", properties: "assigned_agent", customers: "rm_id" }, property_manager: { properties: "assigned_manager", leases: "manager_id" } };
 // Records of these modules carry a branch_id (backend/core.py BRANCH_SCOPED); directors and super admins see every branch.
@@ -128,7 +130,7 @@ export function requirePerm(u, m, a, path) {
 export const mfaRequiredFor = (u) => (settings().mfa_required_roles || []).includes(u.role);
 export function publicUser(u) {
   return { id: u.id, email: u.email, name: u.name, role: u.role, role_label: ROLES[u.role], branch_ids: u.branch_ids || [], active: u.active, phone: u.phone,
-    permissions: PERMS[u.role] || {}, created_at: u.created_at, mfa_enabled: !!u.mfa_enabled, owner_id: u.owner_id || null, investor_id: u.investor_id || null,
+    permissions: PERMS[u.role] || {}, created_at: u.created_at, mfa_enabled: !!u.mfa_enabled, owner_id: u.owner_id || null, investor_id: u.investor_id || null, customer_id: u.customer_id || null,
     last_login: u.last_login || null, all_branches: allowedBranches(u) === null, designation: u.designation || null, department: u.department || null,
     reports_to: u.reports_to || null, whatsapp: u.whatsapp || null, show_in_directory: u.show_in_directory !== false, joined_on: u.joined_on || null,
     mfa_setup_required: mfaRequiredFor(u) && !u.mfa_enabled };
@@ -209,11 +211,12 @@ export function calcShortstay(ci, co, rate, discount = 0, cleaning = 0, platform
   return { nights, room_revenue: room, gross, platform_fee: r2(platform), net_after_platform: net, management_fee: fee, operating_costs: r2(costs), owner_payout: r2(net - fee - Number(costs || 0)), adr: r2(room / nights) };
 }
 
-export function calcOwnerStatement(rents, exps) {
+export function calcOwnerStatement(rents, exps, charges = []) {
   const rent = r2(rents.reduce((s, i) => s + Number(i.amount), 0));
   const fee = r2(rents.reduce((s, i) => s + (Number(i.amount) * Number(i.fee_pct || 0)) / 100, 0));
   const ex = r2(exps.reduce((s, e) => s + Number(e.amount), 0));
-  return { rent_collected: rent, management_fee: fee, expenses: ex, net_payable: r2(rent - fee - ex) };
+  const chg = r2(charges.reduce((s, c) => s + Number(c.amount), 0));
+  return { rent_collected: rent, management_fee: fee, expenses: ex, charges_collected: chg, net_payable: r2(rent - fee - ex + chg) };
 }
 
 export const rangesOverlap = (a1, a2, b1, b2) => a1 < b2 && b1 < a2;

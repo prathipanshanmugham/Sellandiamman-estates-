@@ -80,7 +80,7 @@ route("POST", "/auth/reset-password", ({ body }) => {
   u.demo_password = body.password;
   if (t.purpose === "activation") u.active = true;
   delete state.resetTokens[body.token];
-  return { ok: true };
+  return { ok: true, portal: PORTAL_ROLES.includes(u.role) ? u.role : null };
 });
 route("POST", "/auth/change-password", ({ user, body }) => {
   if (!passOk(user, body.current_password)) fail(400, "Current password is incorrect");
@@ -127,10 +127,12 @@ export function createUser(body, actor) {
   if (body.password && body.password.length < 8) fail(422, "password: at least 8 characters");
   if (body.role === "owner" && !one("owners", (o) => o.id === body.owner_id && notDeleted(o))) fail(422, "Choose the owner record this portal account belongs to");
   if (body.role === "investor" && !one("investors", (o) => o.id === body.investor_id && notDeleted(o))) fail(422, "Choose the investor record this portal account belongs to");
+  if (["tenant", "buyer"].includes(body.role) && !one("customers", (c) => c.id === body.customer_id && notDeleted(c) && !c.merged_into)) fail(422, "Choose the customer this login belongs to");
   const portal = PORTAL_ROLES.includes(body.role);
   const uid = newId();
   const u = { id: uid, email, name: body.name.trim(), role: body.role, phone: body.phone || null, branch_ids: portal ? [] : checkBranches(body.branch_ids), active: !!body.password,
-    created_at: nowIso(), owner_id: body.role === "owner" ? body.owner_id : null, investor_id: body.role === "investor" ? body.investor_id : null, demo_password: body.password || undefined };
+    created_at: nowIso(), owner_id: body.role === "owner" ? body.owner_id : null, investor_id: body.role === "investor" ? body.investor_id : null,
+    customer_id: ["tenant", "buyer"].includes(body.role) ? body.customer_id : null, demo_password: body.password || undefined };
   if (!portal) Object.assign(u, { designation: body.designation || null, department: body.department || null, whatsapp: body.whatsapp || null, joined_on: body.joined_on || null,
     reports_to: checkManager(uid, body.reports_to), show_in_directory: true });
   db.users.push(u);
@@ -376,7 +378,12 @@ export function statementData(oid, month) {
   const pids = db.properties.filter((p) => p.owner_id === oid).map((p) => p.id);
   const wos = db.work_orders.filter((w) => pids.includes(w.property_id) && w.charge_to === "owner" && ["completed", "closed"].includes(w.status) && (w.completed_at || "").startsWith(month));
   const exps = wos.map((w) => ({ amount: w.actual_cost || 0, description: `${w.code} ${w.title}`, property_id: w.property_id }));
-  return [rents, exps, calcOwnerStatement(rents.map((r) => ({ amount: r.amount, fee_pct: r.mgmt_fee_pct || 0 })), exps)];
+  return [rents, exps, calcOwnerStatement(rents.map((r) => ({ amount: r.amount, fee_pct: r.mgmt_fee_pct || 0 })), exps, ownerChargeItems(oid, month))];
+}
+// bills (EB, water…) collected from tenants in the month for the owner; passed on in full (backend owner_charge_items)
+export function ownerChargeItems(oid, month) {
+  return sortBy(db.charge_payments.filter((r) => r.owner_id === oid && r.payee === "owner" && r.mode === "collect" && r.month === month), "date")
+    .map((r) => ({ amount: r.amount, description: `${r.label} (${r.lease_code})`, property_id: r.property_id, date: r.date, receipt_no: r.receipt_no || null, lease_code: r.lease_code }));
 }
 const arrearsOf = (ls) => r2((ls.schedule || []).filter((s) => s.due_date < todayIST()).reduce((t, s) => t + s.amount - s.paid, 0));
 
@@ -390,7 +397,10 @@ route("GET", "/portal/overview", ({ user }) => {
   const [, , calc] = statementData(oid, month);
   const last = sortBy(db.owner_statements.filter((s) => s.owner_id === oid), "month", -1)[0] || null;
   const due = leases.map((ls) => { const n = ls.schedule.find((s) => s.paid < s.amount); return n && { lease_code: ls.code, property_title: ls.property_title, period: n.period, due_date: n.due_date, balance: r2(n.amount - n.paid) }; }).filter(Boolean);
+  const openSt = ["open", "acknowledged", "in_progress", "on_hold"];
   return { owner, properties: props, month, this_month: calc, arrears: r2(leases.reduce((t, l) => t + arrearsOf(l), 0)), active_leases: leases.length,
+    bills_open: db.lease_charges.filter((c) => c.owner_id === oid && ["due", "partly_paid"].includes(c.status)).length,
+    open_tickets: db.tickets.filter((t) => openSt.includes(t.status) && ((t.raised_by || {}).user_id === user.id || (t.owner_id === oid && t.visible_to_owner))).length,
     occupied: props.filter((p) => p.occupancy === "occupied").length, last_statement: last ? omit(last, ["by"]) : null,
     open_requests: db.work_orders.filter((w) => pids.includes(w.property_id) && ["open", "assigned", "in_progress"].includes(w.status)).length,
     upcoming_stays: db.bookings.filter((b) => pids.includes(b.property_id) && b.status === "confirmed" && b.check_in >= todayIST()).length,
@@ -404,7 +414,8 @@ route("GET", "/portal/statements", ({ user }) => ({ settled: sortBy(db.owner_sta
 route("GET", "/portal/statements/:month", ({ user, params }) => {
   const [rents, exps, calc] = statementData(user.owner_id, params.month);
   const settled = one("owner_statements", (s) => s.owner_id === user.owner_id && s.month === params.month);
-  return { month: params.month, rents: rents.map((r) => pick(r, ["date", "lease_code", "period", "amount", "receipt_no"])), ...calc, expense_items: exps, settled: settled ? omit(settled, ["by"]) : null };
+  return { month: params.month, rents: rents.map((r) => pick(r, ["date", "lease_code", "period", "amount", "receipt_no"])), ...calc, expense_items: exps,
+    charge_items: ownerChargeItems(user.owner_id, params.month), settled: settled ? omit(settled, ["by"]) : null };
 }, { auth: "owner" });
 route("GET", "/portal/work-orders", ({ user }) => {
   const pids = ownerProps(user.owner_id).map((p) => p.id);

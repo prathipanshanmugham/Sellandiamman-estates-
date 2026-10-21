@@ -38,7 +38,7 @@ async def overview(user=Depends(owner_user)):
     arrears = round(sum(s["amount"] - s["paid"] for ls in leases for s in ls["schedule"]
                         if s["due_date"] < t.isoformat()), 2)
     rents, exps, calc = await _statement_data(oid, month)
-    last = await db.owner_statements.find({"owner_id": oid}, {"_id": 0}).sort("month", -1).limit(1).to_list(1)
+    last = await db.owner_statements.find({"owner_id": oid}, {"_id": 0, "by": 0}).sort("month", -1).limit(1).to_list(1)
     open_wo = await db.work_orders.count_documents({"property_id": {"$in": pids},
                                                     "status": {"$in": ["open", "assigned", "in_progress"]}})
     upcoming = await db.bookings.count_documents({"property_id": {"$in": pids}, "status": "confirmed",

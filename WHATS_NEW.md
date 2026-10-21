@@ -1,3 +1,70 @@
+# What's new – Round 4 (21 Oct 2026)
+
+## New logo, everywhere
+- The supplied artwork rebuilt as clean vector: grey **S**, red **A** chevron, the **SELLANDIAMMAN** wordmark traced
+  letter by letter, and **ESTATES** set between two fine rules in the same letters. Straight edges are exact, repeated
+  letters match, the A has an even stroke.
+- Horizontal lockup in the header, staff app and portals; stacked lockup (as in the artwork) in the footer and the
+  social share image; two-tone mark on the favicon, app icons and the preview's loading screen; PDF headers (receipts,
+  invoices, statements, the CEO report, the organisation chart) carry the same logo.
+- `python scripts/brand/build_brand.py` regenerates every logo file from `scripts/brand/sellandiamman-logo-source.png`.
+
+## Customer login (header) and staff sign-in (footer)
+- **Customer login** in the website header opens `/login`: Tenant, Owner / lessor, Buyer, Investor, each with its own
+  sign-in page and words. **Staff sign in** moved to the footer.
+- Staff give logins from the customer record ("Customer logins"), the lease ("Give the tenant a login"), or **Users &
+  Roles → Customer login**. The person gets a link to set a password (valid 7 days; shown on screen when email is off).
+
+## Tenant portal (`/tenant`)
+- Rent: next due, overdue, month-by-month schedule, receipts (PDF), deposit held and its movements, move-in records.
+- **Bills**: electricity (EB) by meter reading (previous → current × rate + fixed), water, association maintenance,
+  internet, parking and more, with receipts. Bills are either collected by us or paid by the tenant to the provider.
+- **Pay**: the amount, a UPI QR code and an "Open UPI app" button with the amount and lease code filled in, plus bank
+  details. **I have paid** sends the UPI reference; staff confirm it on the lease and the receipt appears.
+- Documents shared with them (the rental agreement is shared automatically when finalised with sharing on).
+- Lease ending within 60 days: a prompt to ask for renewal or give notice.
+
+## Buyer portal (`/buyer`)
+- The purchase step by step (price agreed → agreement → registration → done), checklist, agreed value, history,
+  site visits, homes the relationship manager shared, documents, and one-tap requests for a visit, home-loan help or
+  registration and legal help.
+
+## Owner (lessor) portal
+- **Bills** tab for tenant bills on their properties; statements now add bills collected for them (EB, water…) in full,
+  with no fee taken on them. **Requests & repairs**: raise requests, follow repairs their tenants reported, see work
+  order costs.
+
+## Service requests (`/erp/tickets`)
+- Every customer can raise requests with photos: repairs (plumbing, electrical, appliance…), cleaning, keys, internet,
+  complaints, documents, rent or bill questions, renewal, move-out, payouts, listing and rent revision, EB or tax name
+  transfer, site visits, home loans, registration.
+- Staff desk: open / new / waiting for reply / past due / rating, filters, assignment, priority, reply-by and fix-by
+  targets, internal notes the customer never sees, attachments, and **Raise a work order** with vendor and quote.
+  When the work order is completed the request is resolved and the customer is asked to rate it; they can reopen it.
+- Everyone involved is notified in the app (and by email when switched on).
+
+## Lease bills and payment notices
+- On each lease: add bills (EB readings remember the last reading), record payments with receipts, mark direct
+  bills paid, waive, and confirm or reject the tenant's payment notices. Collected bills go to the owner-funds ledger and
+  the owner's statement; bills for our own services go to company income.
+- **Settings → Rent collection account**: UPI ID, account name, bank, account number, IFSC and a note for tenants.
+
+## Password vault (`/erp/vault`)
+- One place for the company's logins: Airbnb, Booking.com, Agoda, MakeMyTrip / Goibibo, Vrbo, Expedia, 99acres,
+  MagicBricks, Housing.com, NoBroker, OLX, TNREGINET, TNRERA, TNPDCL / TANGEDCO, GST, Income Tax, TRACES, MCA, Google,
+  Meta, WhatsApp Business, YouTube, LinkedIn, GoDaddy, Hostinger, Razorpay, PhonePe, Paytm, net banking, Wi-Fi and
+  door codes – with the website filled in for you.
+- Encrypted with AES-256-GCM using `VAULT_KEY` on the server. Unlock with your own password (and 2-step code) for 15
+  minutes; show or copy one field at a time; 2-step codes for shared accounts without the key leaving the vault.
+- Share each login with roles or named people; only the person who added it and administrators can change it; old
+  passwords are kept (last 10); change reminders (e.g. every 90 days for GST and banking); a strong password generator;
+  an activity tab of every view, copy, code and change. Auditors and customers never see the vault.
+
+## To switch on after updating
+1. Add `VAULT_KEY` to `backend/.env` and keep a copy off the server (DEPLOYMENT.md, "Updating").
+2. Fill in **Settings → Rent collection account**.
+3. Give tenants, owners and buyers their logins.
+
 # What's new – Round 3 (21 Oct 2026)
 
 ## Five branches

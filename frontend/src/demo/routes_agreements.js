@@ -266,6 +266,8 @@ route("POST", "/agreements/:id/finalise", ({ user, params, body }) => {
   let et = a.entity_type; let eid = a.entity_id;
   if (["lease", "deal"].includes(et)) { et = "property"; eid = db[ENTITY[a.entity_type]].find((x) => x.id === a.entity_id)?.property_id; } else if (et === "investment") { et = "investor"; eid = db.investments.find((x) => x.id === a.entity_id)?.investor_id; }
   if (eid && ["property", "owner", "investor"].includes(et)) db.documents.push({ ...d, id: newId(), entity_type: et, entity_id: eid, share_with_owner: share && OWNER_TPL.includes(a.template) && ["property", "owner"].includes(et), share_with_investor: share && a.template === "investor_coinvestment" && et === "investor" });
+  // a rental or lease agreement also sits on the lease, where the tenant sees it once shared
+  if (a.entity_type === "lease" && a.entity_id) db.documents.push({ ...d, id: newId(), entity_type: "lease", entity_id: a.entity_id, share_with_owner: false, share_with_investor: false, share_with_tenant: share && OWNER_TPL.includes(a.template) });
   Object.assign(a, { status: "final", finalised_at: nowIso(), finalised_by: user.name });
   audit(user, "agreement_finalised", "agreements", a.id, { shared: share });
   return { ok: true };

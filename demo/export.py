@@ -27,6 +27,8 @@ os.environ.update({
     "SEED_DEMO": "true", "DEMO_PASSWORD": "Demo@12345", "ADMIN_EMAIL": "admin@demo.sellandiamman.test",
     "ADMIN_PASSWORD": "Demo@12345", "BCRYPT_ROUNDS": "4", "DISABLE_AUTOMATIONS": "true", "COOKIE_SECURE": "false",
     "SITE_URL": "https://estates.sellandiamman.example", "CORS_ORIGINS": "*", "UPLOAD_DIR": str(TMP / "uploads"),
+    # throwaway key so the sample vault logins can be made; the preview stores them decrypted (made-up values)
+    "VAULT_KEY": "ZGVtby1wcmV2aWV3LXZhdWx0LWtleS0zMi1ieXRlcyE=",
 })
 sys.path.insert(0, str(ROOT / "backend"))
 
@@ -35,6 +37,7 @@ import pyotp  # noqa: E402
 from PIL import Image  # noqa: E402
 import server  # noqa: E402
 import routes_admin  # noqa: E402
+import routes_vault  # noqa: E402
 from datetime import timedelta  # noqa: E402
 from core import db, today_ist, now_iso  # noqa: E402
 from routes_auth import _qr_svg  # noqa: E402
@@ -92,7 +95,9 @@ async def main():
         for i, d in enumerate(await db.deals.find({}, {"_id": 0}).to_list(500)):
             await grab(f"/deals/{d['id']}/summary.pdf", f"deal-{i}")
         for i, p in enumerate(await db.rent_payments.find({}, {"_id": 0}).to_list(500)):
-            await grab(f"/rent-payments/{p['id']}/receipt.pdf", f"rent-{i}", (f"/portal/rent-receipts/{p['id']}/pdf",))
+            await grab(f"/rent-payments/{p['id']}/receipt.pdf", f"rent-{i}", (f"/portal/rent-receipts/{p['id']}/pdf", f"/tenant/rent-receipts/{p['id']}/pdf"))
+        for i, p in enumerate(await db.charge_payments.find({"receipt_no": {"$ne": None}}, {"_id": 0}).to_list(500)):
+            await grab(f"/charge-payments/{p['id']}/receipt.pdf", f"billreceipt-{i}", (f"/tenant/bill-receipts/{p['id']}/pdf",))
         owner_user = await db.users.find_one({"role": "owner"}, {"_id": 0})
         for i, o in enumerate(await db.owners.find({}, {"_id": 0}).to_list(100)):
             months = sorted({r["period"] for r in await db.rent_payments.find({"owner_id": o["id"]}, {"_id": 0}).to_list(500)})
@@ -131,6 +136,11 @@ async def main():
                     u.pop(k, None)
         if name == "audit_logs":
             rows = sorted(rows, key=lambda r: r.get("at") or "", reverse=True)[:400]
+        if name in ("vault_items", "vault_history"):
+            # the preview has no server key: keep the sample logins' secrets readable (they are made-up demo values)
+            for r in rows:
+                iid = r.get("item_id") or r["id"]
+                r["demo_secret"] = routes_vault.decrypt(iid, r.pop("secret"))
         snap[name] = rows
     secret = "JBSWY3DPEHPK3PXPSELLANDIAM"[:32]
     uri = pyotp.TOTP(secret).provisioning_uri(name="you@sellandiamman.example", issuer_name="Sellandiamman Estates")
@@ -142,7 +152,25 @@ async def main():
         x = t["stamp"]({})
         return {"kind": "flat", "rate": x["rate"], "duty": x["duty"]}
     templates = {k: {**{f: v for f, v in t.items() if f != "stamp"}, "stamp": stamp_of(t)} for k, t in A.TEMPLATES.items()}
-    meta = {"exported_at": now_iso(), "today": today_ist().isoformat(), "pdfs": pdfs,
+    # UPI QR codes for what the sample tenant owes (the preview cannot draw QR codes itself)
+    upi_qr = {}
+    for ls in await db.leases.find({"customer_id": {"$ne": None}}, {"_id": 0}).to_list(100):
+        t_user = await db.users.find_one({"role": "tenant", "customer_id": ls["customer_id"]})
+        if not t_user:
+            continue
+        async with httpx.AsyncClient(transport=transport, base_url="http://demo") as tc:
+            await tc.post("/api/auth/login", json={"email": t_user["email"], "password": "Demo@12345"}, headers={"x-forwarded-for": "10.9.9.8"})
+            asks = [{"lease_id": ls["id"], "kind": "rent", "period": s["period"]} for s in ls["schedule"] if s["paid"] < s["amount"]][:3]
+            asks += [{"lease_id": ls["id"], "kind": "charge", "charge_id": c["id"]}
+                     for c in await db.lease_charges.find({"lease_id": ls["id"], "status": {"$in": ["due", "partly_paid"]}, "mode": "collect"}, {"_id": 0}).to_list(50)]
+            for q in asks:
+                r = await tc.get("/api/tenant/pay", params=q)
+                if r.status_code == 200 and r.json().get("upi_uri"):
+                    upi_qr[r.json()["upi_uri"]] = r.json()["qr_svg"]
+    if upi_qr:
+        upi_qr["_sample"] = next(iter(upi_qr.values()))
+    meta = {"exported_at": now_iso(), "today": today_ist().isoformat(), "pdfs": pdfs, "upi_qr": upi_qr,
+            "vault": {"presets": routes_vault.PRESETS, "categories": [{"key": k, "label": v} for k, v in routes_vault.CATEGORIES.items()]},
             "mfa_demo": {"secret": secret, "otpauth_uri": uri, "qr_svg": _qr_svg(uri)},
             "agreement_templates": templates, "site_defaults": DEFAULT_SITE, "section_types": SECTION_TYPES}
     OUT_JSON.write_text(json.dumps({"meta": meta, "db": snap}, default=str, separators=(",", ":")))

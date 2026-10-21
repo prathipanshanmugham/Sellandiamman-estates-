@@ -36,9 +36,9 @@ export function Tickets() {
         <Kpi title="Customer rating" value={stats.avg_rating ? `${stats.avg_rating} / 5` : "-"} hint={`${stats.rated} rated`} />
       </div>}
       <div className="mb-4 flex flex-wrap items-end gap-2">
-        <select className="inp !w-auto" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} aria-label="Status" data-testid="tk-filter-status"><option value="active">Open (all active)</option><option value="all">Everything</option>{["open", "acknowledged", "in_progress", "on_hold", "resolved", "closed", "cancelled"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
-        <select className="inp !w-auto" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} aria-label="Type"><option value="">All types</option>{cats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
-        <input className="inp !w-48" placeholder="Search" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} aria-label="Search" />
+        <select className="inp sm:!w-auto" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} aria-label="Status" data-testid="tk-filter-status"><option value="active">Open (all active)</option><option value="all">Everything</option>{["open", "acknowledged", "in_progress", "on_hold", "resolved", "closed", "cancelled"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
+        <select className="inp sm:!w-auto sm:max-w-xs" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} aria-label="Type"><option value="">All types</option>{cats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
+        <input className="inp sm:!w-48" placeholder="Search" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} aria-label="Search" />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.mine} onChange={(e) => setF({ ...f, mine: e.target.checked })} />Assigned to me</label>
       </div>
       <DataTable testid="tickets-table" loading={loading} rows={rows} onRow={(r) => nav(`/erp/tickets/${r.id}`)} empty="No requests here." columns={[

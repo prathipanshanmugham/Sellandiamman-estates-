@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDate, inr, label, openFile, priceLabel, imgSrc } from "../../lib/api";
+import { api, fmtDate, inr, label, openFile, priceLabel, imgSrc, payMethod } from "../../lib/api";
 import { Badge, DataTable, Kpi, Section, useList, act, Facts } from "../../components/erp/kit";
 import { PortalShell } from "../../components/portal/PortalShell";
 import { RequestsList, RequestDetail } from "../../components/portal/Requests";
@@ -46,7 +46,7 @@ export function OwnerRent() {
       {rows.map((l) => (
         <Section key={l.id} title={`${l.property_title} · ${l.code}`} actions={<Badge v={l.status} />}>
           <Facts items={[["Tenant", l.tenant_name], ["Period", `${fmtDate(l.start_date)} – ${fmtDate(l.end_date)}`], ["Rent", `${inr(l.rent)} a month, due on day ${l.due_day}`], ["Yearly increase", `${l.escalation_pct}%`], ["Deposit held for you", inr(l.deposit_held)], ["Overdue", <b className={l.arrears > 0 ? "text-red-700" : ""}>{inr(l.arrears)}</b>]]} />
-          <div className="mt-4"><DataTable testid={`owner-payments-${l.code}`} rows={l.payments} columns={[{ key: "period", label: "Month", render: (p) => monthLabel(p.period) }, { key: "date", label: "Received", render: (p) => fmtDate(p.date) }, { key: "method", label: "Method", render: (p) => label(p.method) }, { key: "amount", label: "Amount", render: (p) => inr(p.amount) }, { key: "x", label: "", render: (p) => <button className="btn-line btn-sm" onClick={() => openFile(`/portal/rent-receipts/${p.id}/pdf`, { name: `Rent receipt ${p.receipt_no}` })}>Receipt</button> }]} empty="No rent received yet." /></div>
+          <div className="mt-4"><DataTable testid={`owner-payments-${l.code}`} rows={l.payments} columns={[{ key: "period", label: "Month", render: (p) => monthLabel(p.period) }, { key: "date", label: "Received", render: (p) => fmtDate(p.date) }, { key: "method", label: "Method", render: (p) => payMethod(p.method) }, { key: "amount", label: "Amount", render: (p) => inr(p.amount) }, { key: "x", label: "", render: (p) => <button className="btn-line btn-sm" onClick={() => openFile(`/portal/rent-receipts/${p.id}/pdf`, { name: `Rent receipt ${p.receipt_no}` })}>Receipt</button> }]} empty="No rent received yet." /></div>
         </Section>
       ))}
     </div>

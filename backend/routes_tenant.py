@@ -144,8 +144,9 @@ async def pay(lease_id: str, kind: str = "rent", period: Optional[str] = None, c
     to = await _pay_to()
     out = {"amount": amount, "label": label, "period": period, "pay_to": to, "direct": False}
     if to.get("upi_id") and amount > 0:
-        name = quote(to.get("account_name") or "Sellandiamman Estates")
-        uri = f"upi://pay?pa={quote(to['upi_id'])}&pn={name}&am={amount:.2f}&cu=INR&tn={quote(label[:60])}"
+        q = lambda s: quote(s, safe="!~*'()")  # noqa: E731  same escaping as JavaScript's encodeURIComponent
+        name = q(to.get("account_name") or "Sellandiamman Estates")
+        uri = f"upi://pay?pa={q(to['upi_id'])}&pn={name}&am={amount:.2f}&cu=INR&tn={q(label[:60])}"
         from routes_auth import _qr_svg
         out.update({"upi_uri": uri, "qr_svg": _qr_svg(uri)})
     return out

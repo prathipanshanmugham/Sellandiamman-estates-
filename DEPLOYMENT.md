@@ -47,6 +47,7 @@ cp backend/.env.example backend/.env
 | `ADMIN_EMAIL` | The first administrator's email |
 | `ADMIN_PASSWORD` | A strong temporary password (10+ characters). Remove it after the first sign-in. |
 | `SEED_DEMO` | `false` |
+| `VAULT_KEY` | `openssl rand -base64 32` – encrypts the password vault. **Keep a copy off the server** (sealed envelope or your own password manager) and never change it once logins are saved. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Your mail provider (Zoho Mail, Google Workspace, Amazon SES, Brevo…). Without these, password links are shown on screen for an admin to share. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Optional: free Cloudflare Turnstile keys for an "I am human" check on public forms |
 
@@ -73,8 +74,12 @@ Open `https://www.yourdomain.in`, then `https://www.yourdomain.in/erp/login`.
    blank). Check the head office. Then set each manager under Users & Roles (branch, designation, reports to).
 8. **Settings**: agreement signatory and designation, monthly revenue targets per branch and, if you like, the CEO
    health-score weights.
-9. **Owners** and **Investors**: invite them to their portals from each record.
-10. Add properties, verify ownership, record the marketing authorisation, then publish.
+9. **Settings → Rent collection account**: the UPI ID and bank details tenants pay rent and bills to (the owner-funds account).
+10. **Customer logins**: from a customer, lease, owner or investor record (or **Users & Roles → Customer login**) give tenants,
+   owners (lessors), buyers and investors their own sign-in. They set a password from the link (valid 7 days) and sign in
+   at `/login`.
+11. **Password vault** (`/erp/vault`): add the company's platform logins and share each with the roles that need it.
+12. Add properties, verify ownership, record the marketing authorisation, then publish.
 
 ## Sharing a server that already runs nginx
 
@@ -137,7 +142,19 @@ git pull
 docker compose up -d --build
 ```
 
-New database indexes and settings are created automatically on start. Nothing is deleted. Updating from Round 2
+New database indexes and settings are created automatically on start. Nothing is deleted.
+
+**Round 5 (password vault):** add a vault key once, before or after updating, and keep a copy off the server:
+
+```bash
+echo "VAULT_KEY=$(openssl rand -base64 32)" >> backend/.env
+grep VAULT_KEY backend/.env      # copy this line somewhere safe, away from the server
+docker compose up -d --build
+```
+
+Without `VAULT_KEY` everything else works and the vault page shows how to switch it on.
+
+Updating from Round 2
 creates the five branches, puts existing records in the branch for their town (head office when unknown), builds the
 customer list from leads, owners, tenants and guests, and seeds the website editor from your Settings.
 
@@ -150,6 +167,11 @@ customer list from leads, owners, tenants and guests, and seeds the website edit
 - **Link previews**: share buttons use `https://<domain>/s/p/<listing>` so WhatsApp shows the photo, price and title.
 - **Search engines**: `/sitemap.xml` lists every published listing and article; submit it in Google Search Console.
 - **Location capture** (GPS on phones) needs the site on HTTPS, which Caddy provides; the browser asks the person first.
+- **Password vault**: secrets are encrypted with `VAULT_KEY` (AES-256-GCM); the database and its backups alone do not reveal
+  them. Keep the key and the backups in different places. Unlocking needs the person's own password (and 2-step code), lasts
+  15 minutes, and every view, copy, code and change is in the vault's activity tab and the audit log.
+- **Customer portals**: tenants (`/tenant`), owners / lessors (`/owner`), buyers (`/buyer`) and investors (`/investor`) each
+  sign in from `/login`; staff sign in from `/erp/login` (link in the website footer).
 - **Logs**: `docker compose logs --tail 200 backend` (emails sent, reminders, errors). Health: `https://<domain>/api/health`.
 
 ## 10. Running without Docker (development)

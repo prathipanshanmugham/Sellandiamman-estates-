@@ -1,8 +1,8 @@
-# Sellandiamman Estates — Website, Staff Workspace, Owner & Investor Portals
+# Sellandiamman Estates — Website, Staff Workspace and Customer Portals
 
 Real-estate services from five branches – Perundurai (head office), Erode, Kadambur, Sathyamangalam and Namakkal: a
-public website, a private staff workspace at `/erp`, an owner portal at `/owner` and an investor dashboard at
-`/investor`, served from one FastAPI backend and one MongoDB database. React (Create React App, Tailwind,
+public website, a private staff workspace at `/erp`, and customer portals for tenants (`/tenant`), owners / lessors
+(`/owner`), buyers (`/buyer`) and investors (`/investor`), served from one FastAPI backend and one MongoDB database. React (Create React App, Tailwind,
 shadcn/ui) on the front end. **To put it on a server, follow [DEPLOYMENT.md](DEPLOYMENT.md).** What changed in this
 round: [WHATS_NEW.md](WHATS_NEW.md).
 
@@ -26,20 +26,42 @@ receipts, owner statements and payouts, maintenance work orders and vendors, sho
 private documents with signed links and versions, tasks, Insights editor, reports (CSV), users and roles, settings with
 a go-live checklist, audit log, notifications and hourly reminders, 2-step sign-in.
 
-**Owner portal** – each owner sees only their own properties, rent and receipts, monthly statements (PDF), maintenance
-requests, short-stay payouts and the documents shared with them.
+**Customer login** (`/login`, in the website header) – a separate sign-in page for each kind of customer; staff sign in
+from the footer (`/erp/login`). Staff create the logins from the customer, lease, owner or investor record.
+
+**Tenant portal** – rent schedule and receipts (PDF), EB / water / maintenance bills with meter readings and receipts,
+deposit, shared documents (the rental agreement), pay by UPI (QR with the amount filled in) or bank transfer, "I have
+paid" notices that staff confirm, and service requests.
+
+**Owner (lessor) portal** – each owner sees only their own properties, rent and receipts, tenant bills, monthly
+statements (PDF, including bills collected for them), requests and repairs with costs, short-stay payouts and the
+documents shared with them.
+
+**Buyer portal** – the purchase step by step (stage, checklist, agreed value), site visits, homes picked for them,
+shared documents, and requests for visits, home-loan help and registration.
+
+**Service requests** – repairs, cleaning, documents, renewals, move-out notices, payout questions… raised from any portal
+or logged by staff; conversation with internal notes, photos, reply-by and fix-by targets, assignment, work orders
+(completing the work order resolves the request), and a rating from the customer.
+
+**Password vault** (`/erp/vault`) – the company's logins for Airbnb, Booking.com, Agoda, MakeMyTrip, property portals,
+TNREGINET, EB, GST, income tax, Google, Meta, domain and hosting, banking, Wi-Fi and door codes; encrypted with
+`VAULT_KEY`, unlocked with your own password (+2-step), shared by role or person, 2-step codes for shared accounts,
+password generator, old passwords kept, change reminders and a full activity log.
 
 **Investor dashboard** – each co-investor sees their holdings, current value, payouts, returns (XIRR), project updates,
 statements (PDF) and shared documents.
 
-**Brand** – the SA mark is built in as vector artwork (`frontend/src/components/brand`, `backend/brand.py`) and used on
-the website, staff app, owner portal, PDFs, favicons, app icons and the social share image (`frontend/public/brand`).
+**Brand** – the Sellandiamman logo (grey S, red A, SELLANDIAMMAN wordmark, ESTATES) is traced from the supplied artwork
+into vector geometry by `scripts/brand/build_brand.py`, which writes `frontend/src/components/brand/mark.js`,
+`backend/brand.py` (PDF headers) and every icon, favicon, lockup and the social share image in `frontend/public`.
 
 ## Layout
 
 - `backend/core.py` – database, sessions, roles and permissions (`PERMS`, `OWN_SCOPE`, `require()`, `scope()`), audit, notifications, email, uploads.
 - `backend/logic.py` – pure business rules (commission, invoice/GST, short-stay split, owner statement, workflows). Unit-tested.
-- `backend/routes_*.py` – `auth` (sign-in, 2-step, users), `public` (website, enquiries, brochures, link previews), `crm`, `props`, `deals`, `finance`, `ops` (leases, statements, maintenance, bookings), `admin` (dashboard, calendar, reports, documents, tasks, approvals, settings, audit), `content` (Insights), `portal` (owner portal), `branches` (branches, places, team chart), `customers`, `channels` (short-stay platforms, iCal sync, pricing, stay requests), `investors` (incl. investor dashboard), `agreements`, `cms` (website editor), `ceo` (health score and report), `seo` (server-rendered pages, sitemap, robots, llms.txt).
+- `backend/routes_*.py` – `auth` (sign-in, 2-step, users), `public` (website, enquiries, brochures, link previews), `crm`, `props`, `deals`, `finance`, `ops` (leases, statements, maintenance, bookings), `admin` (dashboard, calendar, reports, documents, tasks, approvals, settings, audit), `content` (Insights), `portal` (owner portal), `branches` (branches, places, team chart), `customers`, `channels` (short-stay platforms, iCal sync, pricing, stay requests), `investors` (incl. investor dashboard), `agreements`, `cms` (website editor), `ceo` (health score and report), `seo` (server-rendered pages, sitemap, robots, llms.txt), `tickets` (service requests),
+`bills` (tenant bills and payment notices), `tenant` and `buyer` (portals), `vault` (password vault).
 - `backend/agreements.py` – agreement templates and Word / PDF rendering in stamp-paper layout; `backend/ical.py` – calendar files.
 - `backend/pdf.py` – branded PDFs (invoices, receipts, rent receipts, statements, deal summaries, brochures).
 - `frontend/src/pages/public`, `pages/erp`, `pages/owner` – screens; `lib/` – API client, sign-in, dialogs, calculators, Markdown.
@@ -59,8 +81,14 @@ the website, staff app, owner portal, PDFs, favicons, app icons and the social s
 | Marketing | Publish listings, CMS and Insights, campaigns; internal address/notes/owner hidden |
 | Short-Stay Operations | Bookings, cleaning tasks, maintenance; sees check-in instructions |
 | Read-Only Auditor | Read and export reports and audit log, no writes |
-| Property Owner (portal) | Only their own records, through `/api/portal/*` |
-| Investor (portal) | Only their own holdings, payouts and shared documents, through `/api/investor/*` |
+| Owner / Lessor (portal) | Only their own records, through `/api/portal/*` and `/api/my/*` |
+| Investor (portal) | Only their own holdings, payouts and shared documents, through `/api/investor/*` and `/api/my/*` |
+| Tenant (portal) | Only their own leases, bills, receipts and requests, through `/api/tenant/*` and `/api/my/*` |
+| Buyer / Client (portal) | Only their own enquiries, deals, visits and requests, through `/api/buyer/*` and `/api/my/*` |
+
+Password vault: Super Administrator and Director see every login; Branch Manager, Accountant, Marketing and Short-Stay
+Operations can add logins; Sales and Property Managers can use logins shared with them; the Auditor and customers never
+see the vault.
 
 Staff with branches on their account see only those branches' records; directors and super administrators see every
 branch and can narrow the view with the branch picker (sent as the `X-Branch` header). Records outside a user's scope return 404; refused actions return 403 and are audit-logged. Approvals (commission change
@@ -82,12 +110,12 @@ row per night with a unique index, so two people cannot book the same dates at o
 cd backend && pip install -r requirements-dev.txt && cp .env.example .env   # MONGO_URL=mongomock://local for an in-memory DB
 uvicorn server:app --port 8001 --reload        # SEED_DEMO=true loads sample data
 cd frontend && yarn install && yarn start      # proxies /api to :8001
-cd backend && python -m pytest tests -q        # 79 API and unit tests against the running backend
+cd backend && python -m pytest tests -q        # 101 API and unit tests against the running backend (set VAULT_KEY for the vault tests)
 ```
 
 Sample logins when `SEED_DEMO=true` (never on the live server): `ADMIN_EMAIL`/`ADMIN_PASSWORD` from `.env`, and
 `director@`, `branch.manager@`, `sales.agent@`, `property.manager@`, `accountant@`, `marketing@`, `shortstay.ops@`,
-`auditor@`, `owner@`, `investor@demo.sellandiamman.test`, and branch staff `perundurai.manager@`, `perundurai.sales@`,
+`auditor@`, `owner@`, `investor@`, `tenant@`, `buyer@demo.sellandiamman.test`, and branch staff `perundurai.manager@`, `perundurai.sales@`,
 `sathy.manager@`, `kadambur.manager@`, `namakkal.manager@`, `namakkal.sales@` with `DEMO_PASSWORD`.
 
 Hosted preview (runs in the browser with sample data, no server): `python demo/export.py`, then

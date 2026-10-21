@@ -84,7 +84,7 @@ route("GET", "/dashboard", ({ user, query: q }) => {
 
 // ---------------- Documents ----------------
 const ENTITY_MODULE = { property: "properties", lead: "leads", deal: "deals", lease: "leases", owner: "owners", booking: "shortstay", work_order: "maintenance", vendor: "maintenance", company: "settings", post: "cms",
-  customer: "customers", investor: "investors", inv_project: "investors", agreement: "agreements" };
+  customer: "customers", investor: "investors", inv_project: "investors", agreement: "agreements", ticket: "maintenance" };
 const ENTITY_COLL = { property: "properties", lead: "leads", deal: "deals", customer: "customers", agreement: "agreements" };
 const checkEntity = (u, type, id) => { const m = ENTITY_MODULE[type]; if (!m || !can(u, m, "r")) fail(404, "Record not found"); if (ENTITY_COLL[type]) getScoped(ENTITY_COLL[type], m, u, id); };
 const docOut = ({ stored_name, demo_url, ...d }) => d; // eslint-disable-line no-unused-vars
@@ -141,6 +141,13 @@ route("PATCH", "/documents/:id/share", ({ user, params, body }) => {
     d.share_with_investor = !!body.share;
     audit(user, d.share_with_investor ? "document_shared_investor" : "document_unshared_investor", "documents", d.id);
     return { ok: true, share_with_investor: d.share_with_investor };
+  }
+  if (["tenant", "buyer"].includes(body.with)) {
+    const ok = { tenant: ["lease", "customer"], buyer: ["deal", "lead", "customer"] }[body.with];
+    if (!ok.includes(d.entity_type)) fail(422, `Only ${ok.join(" or ")} documents can be shared with the ${body.with}`);
+    d[`share_with_${body.with}`] = !!body.share;
+    audit(user, `document_${body.share ? "shared" : "unshared"}_${body.with}`, "documents", d.id);
+    return { ok: true, [`share_with_${body.with}`]: !!body.share };
   }
   if (!["property", "owner"].includes(d.entity_type)) fail(422, "Only property or owner documents can be shared with the owner");
   d.share_with_owner = !!body.share;
@@ -239,7 +246,7 @@ route("POST", "/approvals/:id/decide", ({ user, params, body }) => {
 }, { auth: "staff" });
 
 // ---------------- Settings, audit, branches, campaigns ----------------
-const SETTINGS_FIELDS = ["name", "legal_name", "phone", "whatsapp", "email", "address", "gstin", "gst_enabled", "gst_rate", "cities", "localities", "approvals", "demo_mode", "invoice_due_days", "office_hours", "enquiry_routing", "rera_no", "social", "mfa_required_roles", "email_notifications", "map_center", "agreement_signatory", "agreement_signatory_designation", "targets", "health_weights"];
+const SETTINGS_FIELDS = ["name", "legal_name", "phone", "whatsapp", "email", "address", "gstin", "gst_enabled", "gst_rate", "cities", "localities", "approvals", "demo_mode", "invoice_due_days", "office_hours", "enquiry_routing", "rera_no", "social", "mfa_required_roles", "email_notifications", "map_center", "agreement_signatory", "agreement_signatory_designation", "targets", "health_weights", "pay_upi_id", "pay_account_name", "pay_bank_name", "pay_account_no", "pay_ifsc", "pay_note"];
 const CMS_FIELDS = ["hero_title", "hero_subtitle", "seo_title", "seo_description", "testimonials", "announcement"];
 route("GET", "/settings", ({ user }) => { if (!(can(user, "settings", "r") || can(user, "cms", "r"))) fail(403, "You do not have permission for this action"); return settings(); }, { auth: "staff" });
 route("PUT", "/settings", ({ user, body }) => {
@@ -267,6 +274,10 @@ route("PUT", "/settings", ({ user, body }) => {
     upd.health_weights = w;
   }
   ["agreement_signatory", "agreement_signatory_designation"].forEach((k) => { if (k in upd) upd[k] = String(upd[k] || "").slice(0, 80); });
+  Object.keys(upd).filter((k) => k.startsWith("pay_")).forEach((k) => { upd[k] = String(upd[k] || "").trim().slice(0, k === "pay_note" ? 300 : 80) || null; });
+  if (upd.pay_upi_id && !/^[\w.-]{2,64}@[A-Za-z]\w{1,30}$/.test(upd.pay_upi_id)) fail(422, "Enter a UPI ID like estates@okaxis");
+  if (upd.pay_ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(upd.pay_ifsc.toUpperCase())) fail(422, "Enter a valid 11-character IFSC");
+  if (upd.pay_ifsc) upd.pay_ifsc = upd.pay_ifsc.toUpperCase();
   if ("invoice_due_days" in upd) upd.invoice_due_days = Math.max(0, Math.min(120, Number(upd.invoice_due_days || 15)));
   Object.assign(settings(), upd);
   audit(user, "settings_updated", "settings", "company", upd);

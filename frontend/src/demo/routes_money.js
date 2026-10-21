@@ -5,7 +5,8 @@ import {
   audit, notify, notifyRoles, postLedger, LEDGERS, calcInvoice, calcShortstay, rangesOverlap,
   checkBranch, homeBranch, headOfficeId, inBranches, linkCustomer, PLATFORMS, daysBetween,
 } from "./core";
-import { statementData } from "./routes_site";
+import { statementData, ownerChargeItems } from "./routes_site";
+import { leaseExtras, onWorkOrderDone } from "./routes_portal5";
 
 // ---------------- Invoices & payments ----------------
 const fy = (d) => { const y = Number(d.slice(5, 7)) >= 4 ? Number(d.slice(0, 4)) : Number(d.slice(0, 4)) - 1; return `${y}-${String((y + 1) % 100).padStart(2, "0")}`; };
@@ -157,9 +158,9 @@ route("POST", "/leases", ({ user, body: b }) => {
   audit(user, "lease_created", "leases", l.id);
   return l;
 }, { perm: ["leases", "w"] });
-route("GET", "/leases/:id", ({ user, params }) => { const l = leaseFor(user, params.id); return { ...l, payments: sortBy(db.rent_payments.filter((p) => p.lease_id === l.id), "date", -1), arrears: arrears(l) }; }, { perm: ["leases", "r"] });
-route("POST", "/leases/:id/rent", ({ user, params, body: b }) => {
-  const l = leaseFor(user, params.id);
+route("GET", "/leases/:id", ({ user, params }) => { const l = leaseFor(user, params.id); return { ...l, payments: sortBy(db.rent_payments.filter((p) => p.lease_id === l.id), "date", -1), arrears: arrears(l), ...leaseExtras(l, user) }; }, { perm: ["leases", "r"] });
+route("POST", "/leases/:id/rent", ({ user, params, body: b }) => recordRent(leaseFor(user, params.id), b, user), { perm: ["leases", "w"] });
+export function recordRent(l, b, user) {
   if (db.rent_payments.some((p) => p.idempotency_key === b.idempotency_key)) fail(409, "This rent payment was already recorded");
   if (l.status !== "active") fail(422, "Rent can only be recorded on an active lease");
   const s = l.schedule.find((x) => x.period === b.period) || fail(422, "Period is outside the lease schedule");
@@ -171,7 +172,7 @@ route("POST", "/leases/:id/rent", ({ user, params, body: b }) => {
   postLedger("owner_funds", "in", amt, "rent", p.id, `Rent ${b.period} ${l.code} received on behalf of owner`, user, l.owner_id, "rent_collected", l.branch_id);
   audit(user, "rent_recorded", "leases", l.id, { amount: amt, period: b.period });
   return p;
-}, { perm: ["leases", "w"] });
+}
 route("POST", "/leases/:id/deposit", ({ user, params, body: b }) => {
   const l = leaseFor(user, params.id);
   const amt = Number(b.amount);
@@ -196,22 +197,23 @@ route("POST", "/leases/:id/terminate", ({ user, params, body }) => {
 route("GET", "/owners/:id/statement", ({ user, params, query }) => {
   if (!(can(user, "leases", "r") || can(user, "finance", "r"))) fail(403, "You do not have permission for this action");
   const [rents, exps, calc] = statementData(params.id, query.month);
-  return { month: query.month, rents, ...calc, expense_items: exps, settled: one("owner_statements", (s) => s.owner_id === params.id && s.month === query.month) };
+  return { month: query.month, rents, ...calc, expense_items: exps, charge_items: ownerChargeItems(params.id, query.month), settled: one("owner_statements", (s) => s.owner_id === params.id && s.month === query.month) };
 }, { perm: ["owners", "r"] });
 route("POST", "/owners/:id/statement/settle", ({ user, params, body }) => {
   const month = body.month || "";
   const owner = one("owners", (o) => o.id === params.id);
   if (!owner || month.length !== 7) fail(422, "Owner and month (YYYY-MM) are required");
   const [rents, exps, calc] = statementData(owner.id, month);
-  if (calc.rent_collected <= 0) fail(422, "No rent collected for this month");
+  if (calc.rent_collected <= 0 && calc.charges_collected <= 0) fail(422, "No rent collected for this month");
   if (db.owner_statements.some((s) => s.owner_id === owner.id && s.month === month)) fail(409, "Statement already settled for this month");
   // split by the branch of each property, so every branch's books balance
   const pb = Object.fromEntries(db.properties.filter((x) => x.owner_id === owner.id).map((x) => [x.id, x.branch_id]));
   const split = {};
-  const slot = (pid) => { const k = pb[pid] || "_none"; return split[k] || (split[k] = { rent: 0, fee: 0, exp: 0 }); };
+  const slot = (pid) => { const k = pb[pid] || "_none"; return split[k] || (split[k] = { rent: 0, fee: 0, exp: 0, chg: 0 }); };
   rents.forEach((r) => { const b = slot(r.property_id); b.rent += r.amount; b.fee += (r.amount * Number(r.mgmt_fee_pct || 0)) / 100; });
   exps.forEach((e) => { slot(e.property_id).exp += Number(e.amount || 0); });
-  Object.values(split).forEach((b) => { ["rent", "fee", "exp"].forEach((k) => { b[k] = r2(b[k]); }); b.net = r2(b.rent - b.fee - b.exp); });
+  ownerChargeItems(owner.id, month).forEach((c) => { slot(c.property_id).chg += Number(c.amount || 0); });
+  Object.values(split).forEach((b) => { ["rent", "fee", "exp", "chg"].forEach((k) => { b[k] = r2(b[k]); }); b.net = r2(b.rent - b.fee - b.exp + b.chg); });
   const st = { id: newId(), code: nextCode("statement", "OS-", 5), owner_id: owner.id, owner_name: owner.name, month, ...calc, by_branch: split, payout_status: "pending_manual_transfer", by: user.id, created_at: nowIso() };
   db.owner_statements.push(st);
   Object.entries(split).forEach(([k, v]) => {
@@ -238,7 +240,8 @@ route("POST", "/owner-statements/:id/mark-paid", ({ user, params, body }) => {
 // ---------------- Maintenance ----------------
 const WO_FLOW = { open: ["assigned", "cancelled"], assigned: ["in_progress", "cancelled"], in_progress: ["completed", "cancelled"], completed: ["closed"], closed: [], cancelled: [] };
 route("GET", "/work-orders", ({ user, query: q }) => sortBy(db.work_orders.filter((w) => (!q.status || w.status === q.status) && inScope(user, "maintenance")(w)), "created_at", -1), { perm: ["maintenance", "r"] });
-route("POST", "/work-orders", ({ user, body: b }) => {
+route("POST", "/work-orders", ({ user, body: b }) => createWorkOrder(b, user), { perm: ["maintenance", "w"] });
+export function createWorkOrder(b, user) {
   const p = one("properties", (x) => x.id === b.property_id) || fail(404, "Property not found");
   if (String(b.title || "").length < 3) fail(422, "title: at least 3 characters");
   checkBranch(user, p.branch_id);
@@ -247,7 +250,7 @@ route("POST", "/work-orders", ({ user, body: b }) => {
   db.work_orders.push(wo);
   notify([p.assigned_manager], `Work order ${wo.code}: ${b.title}`, p.title, "/erp/maintenance", `wo:${wo.id}`);
   return wo;
-}, { perm: ["maintenance", "w"] });
+}
 route("PATCH", "/work-orders/:id", ({ user, params, body }) => {
   const wo = db.work_orders.find((w) => w.id === params.id && inScope(user, "maintenance")(w)) || fail(404, "Work order not found");
   const upd = pick(body, ["vendor_id", "quote_amount", "due_date", "priority", "charge_to"]);
@@ -263,6 +266,7 @@ route("PATCH", "/work-orders/:id", ({ user, params, body }) => {
   Object.assign(wo, upd);
   wo.history.push({ at: nowIso(), by: user.name, event: body.note || (st ? `Status → ${st}` : "Updated") });
   if (upd.status === "completed" && upd.actual_cost > 0) postLedger("company", "out", upd.actual_cost, "work_order", wo.id, `Vendor paid ${wo.code}`, user, wo.vendor_id, "expense:maintenance", wo.branch_id);
+  if (upd.status === "completed" && wo.ticket_id) onWorkOrderDone(wo, user);
   audit(user, "work_order_updated", "maintenance", wo.id, upd);
   return wo;
 }, { perm: ["maintenance", "w"] });

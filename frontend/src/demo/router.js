@@ -29,6 +29,9 @@ export async function dispatch(method, path, query, body, files) {
       if ((o.auth === "staff" || o.perm) && PORTAL_ROLES.includes(ctx.user.role)) fail(403, "This area is for staff accounts");
       if (o.auth === "owner" && (ctx.user.role !== "owner" || !ctx.user.owner_id)) fail(403, "This area is for property owners");
       if (o.auth === "investor" && (ctx.user.role !== "investor" || !ctx.user.investor_id)) fail(403, "This area is for investors");
+      if (o.auth === "tenant" && (ctx.user.role !== "tenant" || !ctx.user.customer_id)) fail(403, "This area is for tenants");
+      if (o.auth === "buyer" && (ctx.user.role !== "buyer" || !ctx.user.customer_id)) fail(403, "This area is for buyers and clients");
+      if (o.auth === "portal" && !PORTAL_ROLES.includes(ctx.user.role)) fail(403, "This area is for customer accounts");
       if (o.perm) requirePerm(ctx.user, o.perm[0], o.perm[1], path);
     }
     return r.handler(ctx);

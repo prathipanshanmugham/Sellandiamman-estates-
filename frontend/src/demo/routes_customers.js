@@ -7,6 +7,7 @@ import {
 } from "./core";
 import { anonymiseLeadRecord } from "./routes_sales";
 import { csvRoute } from "./routes_admin";
+import { customerLogins, loginTypes } from "./routes_portal5";
 
 const LANGS = ["english", "tamil", "hindi", "malayalam", "telugu", "kannada", "other"];
 const cleanTags = (tags) => [...new Set((tags || []).map((t) => String(t).replace(/\s+/g, " ").trim().toLowerCase().slice(0, 30)).filter(Boolean))].sort().slice(0, 15);
@@ -146,6 +147,9 @@ route("GET", "/customers/:id", ({ user, params }) => {
   c.bookings = db.bookings.filter((b) => b.customer_id === c.id).map((b) => pick(b, ["id", "code", "property_title", "check_in", "nights", "status"]));
   if (c.rm_id) c.rm_name = db.users.find((u) => u.id === c.rm_id)?.name || null;
   c.kyc_documents = db.documents.filter((d) => d.entity_type === "customer" && d.entity_id === c.id && d.doc_type === "kyc" && d.is_latest).length;
+  if (can(user, "users", "r")) c.logins = customerLogins(c);
+  c.login_types = loginTypes(c);
+  c.tickets = sortBy(db.tickets.filter((t) => t.customer_id === c.id), "created_at", -1).map((t) => pick(t, ["id", "code", "title", "status", "created_at"]));
   return c;
 }, { perm: ["customers", "r"] });
 

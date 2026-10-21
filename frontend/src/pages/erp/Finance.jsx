@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, fmtDateTime, inr, label, opts, openFile, todayIST, uid } from "../../lib/api";
+import { api, fmtDate, fmtDateTime, inr, label, opts, openFile, todayIST, uid, payMethod } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useDialog } from "../../lib/dialogs";
 import { PageHeader, DataTable, Badge, FormDialog, Modal, Kpi, Facts, useList, act } from "../../components/erp/kit";
@@ -22,7 +22,7 @@ function InvoiceModal({ inv, onClose, reload }) {
           {can("finance", "w") && bal > 0 && <button className="btn-dark btn-sm" onClick={() => setDlg("pay")} data-testid="record-payment-btn">Record payment</button>}
           {can("finance", "w") && <button className="btn-line btn-sm" onClick={() => setDlg("credit")} data-testid="credit-note-btn">Credit note / refund</button>}
         </div>
-        <DataTable testid="payments-table" rows={d.payments} columns={[{ key: "receipt_no", label: "Receipt" }, { key: "date", label: "Date", render: (p) => fmtDate(p.date) }, { key: "method", label: "Method", render: (p) => label(p.method) }, { key: "amount", label: "Amount", render: (p) => inr(p.amount) }, { key: "r", label: "", render: (p) => <button className="btn-line btn-sm" onClick={() => openFile(`/payments/${p.id}/receipt.pdf`, { name: `Receipt ${p.receipt_no}` })}>Receipt PDF</button> }]} empty="No payments yet" />
+        <DataTable testid="payments-table" rows={d.payments} columns={[{ key: "receipt_no", label: "Receipt" }, { key: "date", label: "Date", render: (p) => fmtDate(p.date) }, { key: "method", label: "Method", render: (p) => payMethod(p.method) }, { key: "amount", label: "Amount", render: (p) => inr(p.amount) }, { key: "r", label: "", render: (p) => <button className="btn-line btn-sm" onClick={() => openFile(`/payments/${p.id}/receipt.pdf`, { name: `Receipt ${p.receipt_no}` })}>Receipt PDF</button> }]} empty="No payments yet" />
         {d.credit_notes.length > 0 && <p className="text-sm text-slate-600">Credit notes: {d.credit_notes.map((c) => `${c.number} ${inr(c.amount)}`).join(", ")}</p>}
       </div>}
       <FormDialog open={dlg === "pay"} onClose={() => setDlg("")} title="Record payment" initial={{ amount: bal, method: "bank_transfer", date: todayIST(), idempotency_key: uid() }} fields={[{ name: "amount", label: "Amount (₹)", type: "number", required: true }, { name: "method", label: "Method", type: "select", required: true, options: opts(["bank_transfer", "upi", "cheque", "cash", "card"]) }, { name: "date", label: "Date", type: "date", required: true }, { name: "reference", label: "Reference / UTR" }]} onSubmit={async (v) => { await api.post(`/invoices/${d.id}/payments`, v); after(); }} />

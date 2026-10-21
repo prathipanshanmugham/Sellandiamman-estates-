@@ -13,6 +13,7 @@ import "./routes_stay";
 import "./routes_investors";
 import "./routes_agreements";
 import "./routes_ceo";
+import "./routes_portal5";
 
 // Freeze "today" to the day the sample data was made, so due dates, arrears and the calendar line up.
 const RealDate = Date;

@@ -251,8 +251,8 @@ docker compose up -d backend`}</pre>
       <Tabs defaultValue="logins"><TabsList className="rounded-sm"><TabsTrigger value="logins">Logins</TabsTrigger><TabsTrigger value="activity" data-testid="vault-tab-activity">Activity</TabsTrigger></TabsList>
         <TabsContent value="logins" className="mt-4">
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            <select className="inp !w-auto" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} aria-label="Category"><option value="">All kinds</option>{(meta?.categories || []).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
-            <input className="inp !w-56" placeholder="Search name, login or site" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} aria-label="Search" data-testid="vault-search" />
+            <select className="inp sm:!w-auto" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} aria-label="Category"><option value="">All kinds</option>{(meta?.categories || []).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
+            <input className="inp sm:!w-56" placeholder="Search name, login or site" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} aria-label="Search" data-testid="vault-search" />
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.due} onChange={(e) => setF({ ...f, due: e.target.checked })} />Password change due</label>
             <button className="p-2 text-slate-500 hover:text-slate-900" onClick={reload} aria-label="Refresh"><RefreshCw size={15} /></button>
           </div>
