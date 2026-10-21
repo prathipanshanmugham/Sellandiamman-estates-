@@ -1,12 +1,18 @@
 // Hosted-preview build only (REACT_APP_DEMO=true): the real frontend talks to an in-browser copy of the API
 // seeded from the real backend (see demo/export.py). Production builds load demo-stub.js instead.
 import { api, setFileOpener, setMediaResolver, store } from "../lib/api";
-import { META, db, clone, HttpError } from "./core";
+import { META, db, clone, HttpError, state } from "./core";
 import { dispatch } from "./router";
 import "./routes_site";
 import "./routes_sales";
 import "./routes_money";
 import "./routes_admin";
+import "./routes_places";
+import "./routes_customers";
+import "./routes_stay";
+import "./routes_investors";
+import "./routes_agreements";
+import "./routes_ceo";
 
 // Freeze "today" to the day the sample data was made, so due dates, arrears and the calendar line up.
 const RealDate = Date;
@@ -35,7 +41,10 @@ async function adapter(config) {
   } else if (typeof config.data === "string" && config.data) {
     try { body = JSON.parse(config.data); } catch { body = {}; }
   } else if (config.data && typeof config.data === "object") body = config.data;
+  const hdr = config.headers || {};
+  const branch = (typeof hdr.get === "function" ? hdr.get("X-Branch") : null) || hdr["X-Branch"] || hdr["x-branch"] || "";
   await wait(60 + Math.random() * 90);
+  state.branch = String(branch || "").trim().slice(0, 40);
   try {
     const data = await dispatch(String(config.method || "get").toUpperCase(), path, query, body, files);
     return { data: clone(data), status: 200, statusText: "OK", headers: {}, config, request: {} };

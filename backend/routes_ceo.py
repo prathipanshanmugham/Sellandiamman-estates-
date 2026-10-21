@@ -408,7 +408,9 @@ def report_pdf_bytes(d, company, scope_label):
     k = d["kpis"]
     els = [Paragraph(escape(title), ss["DocTitle"]), Paragraph(escape(scope_label), ss["Small"]), Spacer(1, 8)]
     sc = d["score"]
-    head = Table([[Paragraph(f"<font size=30><b>{sc if sc is not None else '-'}</b></font>", ss["Body"]),
+    from reportlab.lib.styles import ParagraphStyle
+    big = ParagraphStyle("Score", parent=ss["Body"], fontName="Helvetica-Bold", fontSize=26, leading=30)
+    head = Table([[Paragraph(f"{sc if sc is not None else '-'}", big),
                    Paragraph(f"<b>Company health score</b> (out of 100) · grade <b>{d['grade']}</b><br/>"
                              f"Previous period: {d['prev_score'] if d['prev_score'] is not None else '-'} · status: {d['status'].replace('_', ' ')}", ss["Body"])]],
                  colWidths=[30 * mm, 144 * mm])
@@ -433,7 +435,8 @@ def report_pdf_bytes(d, company, scope_label):
         rows.append([Paragraph(f"<b>{escape(p['label'])}</b> (weight {p['weight']})", ss["Body"]), "", f"{p['score'] if p['score'] is not None else '-'}",
                      Paragraph(f"<font color='#{tone[p['status']].hexval()[2:]}'>{p['status'].replace('_', ' ')}</font>", ss["Body"])])
         for m in p["metrics"]:
-            rows.append([Paragraph(escape(m["label"]) + (f"<br/><font size=7 color='#64748B'>{escape(m.get('raw') or '')}</font>" if m.get("raw") else ""), ss["Body"]),
+            raw = escape(m.get("raw") or "").replace("₹", "Rs. ")  # the PDF font has no rupee sign
+            rows.append([Paragraph(escape(m["label"]) + (f"<br/><font size=7 color='#64748B'>{raw}</font>" if raw else ""), ss["Body"]),
                          _fmt(m), f"{m['score'] if m['score'] is not None else '-'}", Paragraph(escape(m["target"]), ss["Small"])])
     els.append(table(["Measure", "Value", "Score", "Target / status"], rows, [86 * mm, 30 * mm, 18 * mm, 40 * mm]))
     if d.get("fix_first"):

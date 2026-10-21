@@ -4,7 +4,9 @@ import { route } from "./router";
 import {
   db, state, META, DEMO_PASSWORD, fail, nowIso, todayIST, newId, r2, notDeleted, one, where, sortBy, pick, omit, rx, nextCode, inr,
   normalizePhone, settings, ROLES, can, publicUser, audit, notify, notifyRoles, mfaRequiredFor, calcOwnerStatement, fileToDataUrl,
+  PORTAL_ROLES, branchForPlace, ensurePlace, geoFields, linkCustomer, eqi, publishDue, livePost,
 } from "./core";
+import { publishedSite } from "./routes_places";
 import { createLead, addActivity } from "./routes_sales";
 
 // ---------------- Auth ----------------
@@ -90,14 +92,32 @@ route("POST", "/auth/change-password", ({ user, body }) => {
 route("GET", "/auth/sessions", ({ user }) => [{ current: true, created_at: user.last_login || nowIso(), ip: "This browser", user_agent: navigator.userAgent.slice(0, 120), mfa: !!user.mfa_enabled }], { auth: "any" });
 
 // ---------------- Users ----------------
-const safeUser = (u) => omit(u, ["demo_password"]);
+const safeUser = (u) => omit(u, ["demo_password", "photo"]);
 route("GET", "/roles", () => Object.entries(ROLES).map(([key, label]) => ({ key, label })), { auth: "staff" });
-route("GET", "/users/lite", () => db.users.filter((u) => u.active && u.role !== "owner").map((u) => pick(u, ["id", "name", "role"])), { auth: "staff" });
+route("GET", "/users/lite", () => db.users.filter((u) => u.active && !PORTAL_ROLES.includes(u.role)).map((u) => pick(u, ["id", "name", "role", "branch_ids", "designation"])), { auth: "staff" });
 route("GET", "/users", () => sortBy(db.users, "created_at").map(safeUser), { perm: ["users", "r"] });
 const checkGrant = (actor, role) => {
   if (!ROLES[role]) fail(422, "Unknown role");
   if (role === "super_admin" && actor.role !== "super_admin") fail(403, "Only a Super Administrator can grant this role");
 };
+function checkBranches(ids) {
+  const list = [...new Set((ids || []).filter(Boolean))];
+  if (list.some((id) => !db.branches.some((b) => b.id === id))) fail(422, "Unknown branch");
+  return list;
+}
+function checkManager(uid, reportsTo) {
+  if (!reportsTo) return null;
+  const seen = new Set([uid]);
+  let cur = reportsTo;
+  while (cur) {
+    if (seen.has(cur)) fail(422, "That reporting line would make a loop");
+    seen.add(cur);
+    const m = db.users.find((u) => u.id === cur);
+    if (!m || PORTAL_ROLES.includes(m.role)) fail(422, "Choose a staff member as the manager");
+    cur = m.reports_to;
+  }
+  return reportsTo;
+}
 export function createUser(body, actor) {
   checkGrant(actor, body.role);
   const email = String(body.email || "").trim().toLowerCase();
@@ -106,8 +126,13 @@ export function createUser(body, actor) {
   if (db.users.some((u) => u.email === email)) fail(409, "A user with this email already exists");
   if (body.password && body.password.length < 8) fail(422, "password: at least 8 characters");
   if (body.role === "owner" && !one("owners", (o) => o.id === body.owner_id && notDeleted(o))) fail(422, "Choose the owner record this portal account belongs to");
-  const u = { id: newId(), email, name: body.name.trim(), role: body.role, phone: body.phone || null, branch_ids: body.branch_ids || [], active: !!body.password,
-    created_at: nowIso(), owner_id: body.role === "owner" ? body.owner_id : null, demo_password: body.password || undefined };
+  if (body.role === "investor" && !one("investors", (o) => o.id === body.investor_id && notDeleted(o))) fail(422, "Choose the investor record this portal account belongs to");
+  const portal = PORTAL_ROLES.includes(body.role);
+  const uid = newId();
+  const u = { id: uid, email, name: body.name.trim(), role: body.role, phone: body.phone || null, branch_ids: portal ? [] : checkBranches(body.branch_ids), active: !!body.password,
+    created_at: nowIso(), owner_id: body.role === "owner" ? body.owner_id : null, investor_id: body.role === "investor" ? body.investor_id : null, demo_password: body.password || undefined };
+  if (!portal) Object.assign(u, { designation: body.designation || null, department: body.department || null, whatsapp: body.whatsapp || null, joined_on: body.joined_on || null,
+    reports_to: checkManager(uid, body.reports_to), show_in_directory: true });
   db.users.push(u);
   const link = body.password ? null : resetLink(u, "activation");
   audit(actor, "user_created", "users", u.id, { role: body.role });
@@ -117,8 +142,11 @@ route("POST", "/users", ({ user, body }) => createUser(body, user), { perm: ["us
 route("PATCH", "/users/:id", ({ user, body, params }) => {
   const t = one("users", (u) => u.id === params.id);
   if (!t) fail(404, "User not found");
-  const upd = pick(body, ["name", "role", "phone", "branch_ids", "active"]);
-  if ("role" in upd) { checkGrant(user, upd.role); if ((upd.role === "owner") !== (t.role === "owner")) fail(422, "Owner portal accounts and staff accounts cannot be converted into each other"); }
+  const upd = Object.fromEntries(Object.entries(pick(body, ["name", "role", "phone", "branch_ids", "active", "designation", "department", "reports_to", "whatsapp", "show_in_directory", "joined_on"]))
+    .filter(([k, v]) => v != null || ["reports_to", "designation", "department", "whatsapp"].includes(k)));
+  if ("role" in upd) { checkGrant(user, upd.role); if ((PORTAL_ROLES.includes(upd.role) || PORTAL_ROLES.includes(t.role)) && upd.role !== t.role) fail(422, "Portal accounts and staff accounts cannot be converted into each other"); }
+  if ("branch_ids" in upd) upd.branch_ids = checkBranches(upd.branch_ids);
+  if ("reports_to" in upd) upd.reports_to = checkManager(t.id, upd.reports_to);
   if (t.role === "super_admin" && user.role !== "super_admin") fail(403, "Cannot modify a Super Administrator");
   if (t.id === user.id && (upd.active === false || ("role" in upd && upd.role !== user.role))) fail(400, "You cannot deactivate or change the role of your own account");
   Object.assign(t, upd);
@@ -145,7 +173,11 @@ const PUBLIC_SETTINGS = ["name", "phone", "whatsapp", "email", "address", "citie
 const live = (p) => ["published", "under_offer"].includes(p.status) && notDeleted(p);
 export const publicView = (p) => ({ ...pick(p, PUBLIC_FIELDS), status: p.status === "under_offer" ? "Under offer" : "Available" });
 
-route("GET", "/public/settings", () => ({ ...pick(settings(), PUBLIC_SETTINGS), turnstile_site_key: null, site_url: null }));
+route("GET", "/public/settings", () => {
+  const site = publishedSite();
+  return { ...pick(settings(), PUBLIC_SETTINGS), turnstile_site_key: null, site_url: null, announcement: site.announcement, testimonials: site.testimonials,
+    hero_title: site.hero.title, hero_subtitle: site.hero.subtitle, seo_title: site.seo.title, seo_description: site.seo.description, footer_tagline: site.footer_tagline };
+});
 route("GET", "/public/properties", ({ query: q }) => {
   let rows = db.properties.filter(live);
   if (q.ids) { const ids = q.ids.split(",").map((s) => s.trim()); rows = rows.filter((p) => ids.includes(p.listing_id)); }
@@ -202,7 +234,7 @@ route("POST", "/public/enquiry", ({ body: b }) => {
   if (kind === "visit") {
     const when = `${b.preferred_date}T${SLOT_TIME[b.preferred_slot] || "11:00"}`;
     const v = { id: newId(), lead_id: lead.id, lead_name: lead.name, property_id: prop.id, property_title: prop.title, property_code: prop.code, scheduled_at: when, preferred_slot: b.preferred_slot,
-      status: "requested", notes: b.message, agent_id: prop.assigned_agent || lead.assigned_to, source: "website", created_at: nowIso() };
+      status: "requested", notes: b.message, agent_id: prop.assigned_agent || lead.assigned_to, source: "website", branch_id: lead.branch_id || null, created_at: nowIso() };
     db.site_visits.push(v);
     addActivity(lead.id, "site_visit", `Visit requested on the website for ${when} at ${prop.code}`);
     if (v.agent_id) notify([v.agent_id], `Visit request: ${lead.name}`, `${prop.title} · ${when}`, `/erp/leads/${lead.id}`, `vreq:${v.id}`);
@@ -219,30 +251,37 @@ route("POST", "/public/owner-submission", async ({ body: b, files }) => {
   if (b.pincode && !/^\d{6}$/.test(b.pincode)) fail(422, "PIN code must be 6 digits");
   const photos = (files.photos || []).slice(0, 6);
   const phone = normalizePhone(b.phone);
+  const city = String(b.city || "").trim(); const locality = String(b.locality || "").trim();
+  const lat = b.lat !== undefined && b.lat !== "" ? Number(b.lat) : null; const lng = b.lng !== undefined && b.lng !== "" ? Number(b.lng) : null;
+  const geo = lat != null && lng != null ? geoFields({ lat, lng, accuracy_m: b.accuracy_m || null, source: b.location_source === "gps" ? "owner_gps" : "owner_pin", captured_by: `Owner (${b.name.trim().slice(0, 60)})` }, "approximate") : {};
   let owner = one("owners", (o) => o.phone === phone);
   const match = !!owner;
   if (!owner) {
     owner = { id: newId(), code: nextCode("owner", "SE-O-"), name: b.name.trim(), phone, email: b.email || null, preferred_contact: b.preferred_contact || "phone", kind: "individual", is_nri: false, source: "owner_submission", created_at: nowIso(), deleted: false };
     db.owners.push(owner);
   }
+  linkCustomer("owners", owner.id, { name: owner.name, phone, email: b.email, types: ["owner", "landlord"], source: "website", city });
+  const branchId = branchForPlace(city, locality);
+  // an owner's new locality is added for staff to review before it shows on the website
+  if (db.locations.some((l) => l.kind === "city" && eqi(l.name, city))) ensurePlace(city, locality, b.pincode || null, geo.geo?.lat ?? null, geo.geo?.lng ?? null, branchId, "owner_submission", false);
   const pid = newId();
   const prop = { id: pid, code: nextCode("property", "SE-P-"), title: `${b.category[0].toUpperCase()}${b.category.slice(1)} in ${b.locality}`, category: b.category, transaction: b.transaction, ownership_type: "third_party",
-    owner_id: owner.id, city: b.city, locality: b.locality, pincode: b.pincode || null, internal_address: b.address || null, price: b.price ? Number(b.price) : null, price_unit: b.transaction === "sale" ? "total" : "per_month",
+    owner_id: owner.id, city, locality, pincode: b.pincode || null, internal_address: b.address || null, price: b.price ? Number(b.price) : null, price_unit: b.transaction === "sale" ? "total" : "per_month",
     description_public: "", owner_description: b.description || null, requested_services: b.services || null, status: "verification_pending", source: "owner_submission", images: [], amenities: [],
-    verification: { status: "pending" }, owner_match_unverified: match, submitted_name: b.name.trim(), branch_id: { erode: "br-erode", perundurai: "br-perundurai" }[String(b.city).toLowerCase()] || null,
-    authorization: {}, publication_history: [], created_at: nowIso(), updated_at: nowIso(), deleted: false, featured: false };
+    verification: { status: "pending" }, owner_match_unverified: match, submitted_name: b.name.trim(), branch_id: branchId,
+    authorization: {}, publication_history: [], created_at: nowIso(), updated_at: nowIso(), deleted: false, featured: false, location_public: "approximate", ...geo };
   db.properties.push(prop);
   for (const f of photos) {
     db.documents.push({ id: newId(), demo_url: await fileToDataUrl(f), size: f.size, content_type: f.type, original_name: f.name, entity_type: "property", entity_id: pid, doc_type: "photo", version: 1, is_latest: true, public_approved: false, uploaded_by: null, created_at: nowIso() });
   }
-  createLead({ name: b.name.trim(), phone, email: b.email, source: "website", interest: b.transaction === "sale" ? "sell" : "management", customer_type: b.transaction === "sale" ? "seller" : "landlord", property_id: pid, requirements: b.description, preferred_contact: b.preferred_contact }, null, `Owner submitted property ${prop.code} for review`);
-  audit(null, "owner_submission", "properties", pid, { photos: photos.length });
-  notifyRoles(["super_admin", "director", "branch_manager"], `Property submitted for verification: ${prop.code}`, `${b.name} - ${b.locality}, ${b.city}`, `/erp/properties/${pid}`, `sub:${pid}`);
+  createLead({ name: b.name.trim(), phone, email: b.email, source: "website", interest: b.transaction === "sale" ? "sell" : "management", customer_type: b.transaction === "sale" ? "seller" : "landlord", branch_id: branchId, property_id: pid, requirements: b.description, preferred_contact: b.preferred_contact }, null, `Owner submitted property ${prop.code} for review`);
+  audit(null, "owner_submission", "properties", pid, { photos: photos.length, location: !!geo.geo });
+  notifyRoles(["super_admin", "director", "branch_manager"], `Property submitted for verification: ${prop.code}`, `${b.name} - ${locality}, ${city}`, `/erp/properties/${pid}`, `sub:${pid}`, "info", branchId);
   return { ok: true, reference: prop.code };
 });
 
 // ---------------- Insights ----------------
-const CATS = ["market_update", "buying_guide", "owner_guide", "area_guide", "legal_tax", "company_news"];
+const CATS = ["market_update", "buying_guide", "owner_guide", "area_guide", "legal_tax", "company_news", "project_update"];
 const LIST = ["id", "slug", "title", "excerpt", "category", "cover_image", "published_at", "author_name", "reading_minutes", "tags"];
 const slugify = (s) => (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "post");
 const minutes = (body) => Math.max(1, Math.round((String(body || "").match(/\w+/g) || []).length / 200));
@@ -252,27 +291,39 @@ route("GET", "/posts", () => sortBy(db.posts.filter(notDeleted), "updated_at", -
 route("GET", "/posts/:id", ({ params }) => one("posts", (p) => p.id === params.id && notDeleted(p)) || fail(404, "Post not found"), { perm: ["cms", "r"] });
 route("POST", "/posts", ({ user, body: b }) => {
   if (!CATS.includes(b.category)) fail(422, "Invalid category");
+  if (b.audience && !["public", "investors"].includes(b.audience)) fail(422, "Invalid audience");
   if (String(b.title || "").trim().length < 4) fail(422, "title: at least 4 characters");
   if (String(b.body || "").length < 20) fail(422, "body: the article is too short");
   const p = { id: newId(), title: b.title, slug: uniqueSlug(slugify(b.slug || b.title)), excerpt: b.excerpt || null, body: b.body, category: b.category, tags: (b.tags || []).slice(0, 10), cover_image: null,
-    seo_title: null, seo_description: null, status: "draft", reading_minutes: minutes(b.body), author_id: user.id, author_name: user.name, published_at: null, created_at: nowIso(), updated_at: nowIso(), deleted: false };
+    seo_title: b.seo_title || null, seo_description: b.seo_description || null, audience: b.audience || "public", status: "draft", reading_minutes: minutes(b.body), author_id: user.id, author_name: user.name, published_at: null, created_at: nowIso(), updated_at: nowIso(), deleted: false };
   db.posts.push(p);
   audit(user, "post_created", "cms", p.id, { title: p.title });
   return p;
 }, { perm: ["cms", "w"] });
 route("PATCH", "/posts/:id", ({ user, body, params }) => {
   const p = one("posts", (x) => x.id === params.id && notDeleted(x)) || fail(404, "Post not found");
-  const upd = pick(body, ["title", "slug", "excerpt", "body", "category", "tags", "cover_image", "seo_title", "seo_description"]);
+  const upd = pick(body, ["title", "slug", "excerpt", "body", "category", "tags", "cover_image", "seo_title", "seo_description", "audience", "featured"]);
+  if ("audience" in upd && !["public", "investors"].includes(upd.audience)) fail(422, "Invalid audience");
+  if ("featured" in upd) upd.featured = !!upd.featured;
   if ("category" in upd && !CATS.includes(upd.category)) fail(422, "Invalid category");
   if ("title" in upd && !(String(upd.title).trim().length >= 4 && String(upd.title).length <= 160)) fail(422, "Title must be 4–160 characters");
   if ("body" in upd) { if (String(upd.body).length < 20) fail(422, "The article is too short"); upd.reading_minutes = minutes(upd.body); }
   if ("slug" in upd) upd.slug = uniqueSlug(slugify(upd.slug || upd.title || p.title), p.id);
   if ("tags" in upd) upd.tags = (upd.tags || []).map((t) => String(t).trim().slice(0, 40)).filter(Boolean).slice(0, 10);
-  if (body.status && body.status !== p.status) {
-    if (!["draft", "published"].includes(body.status)) fail(422, "Invalid status");
-    if (body.status === "published" && !can(user, "cms", "p")) fail(403, "You are not authorised to publish");
+  if (body.status && (body.status !== p.status || body.status === "scheduled")) {
+    if (!["draft", "published", "scheduled"].includes(body.status)) fail(422, "Invalid status");
+    if (["published", "scheduled"].includes(body.status) && !can(user, "cms", "p")) fail(403, "You are not authorised to publish");
     upd.status = body.status;
+    if (body.status === "scheduled") {
+      const at = String(body.publish_at || "");
+      // a time without a zone is India time, as on the server
+      const when = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(at) ? at : `${at}+05:30`);
+      if (!at || Number.isNaN(when)) fail(422, "Choose a date and time to publish");
+      if (when <= Date.now()) fail(422, "Choose a time in the future, or publish now");
+      upd.publish_at = new Date(when).toISOString();
+    }
     if (body.status === "published" && !p.published_at) upd.published_at = nowIso();
+    if (body.status === "draft") upd.publish_at = null;
   }
   upd.updated_at = nowIso();
   Object.assign(p, upd);
@@ -294,16 +345,27 @@ route("POST", "/posts/:id/cover", async ({ user, params, files }) => {
   Object.assign(p, { cover_image: `/api/public/media/${d.id}`, updated_at: nowIso() });
   return { cover_image: p.cover_image };
 }, { perm: ["cms", "w"] });
+route("POST", "/posts/:id/image", async ({ user, params, files }) => {
+  const p = one("posts", (x) => x.id === params.id && notDeleted(x)) || fail(404, "Post not found");
+  const f = files.file?.[0] || fail(422, "Choose a photo");
+  if (!["image/jpeg", "image/png", "image/webp"].includes(f.type)) fail(422, `File type not allowed: ${f.type || "unknown"}`);
+  if (f.size > 5 * 1024 * 1024) fail(422, "Image is larger than 5 MB");
+  const d = { id: newId(), demo_url: await fileToDataUrl(f), size: f.size, content_type: f.type, original_name: f.name, entity_type: "post", entity_id: p.id, doc_type: "photo", version: 1, is_latest: true, public_approved: true, uploaded_by: user.id, uploaded_by_name: user.name, created_at: nowIso() };
+  db.documents.push(d);
+  return { url: `/api/public/media/${d.id}`, markdown: `![${f.name.replace(/\.[^.]+$/, "")}](/api/public/media/${d.id})` };
+}, { perm: ["cms", "w"] });
 route("GET", "/public/posts", ({ query: q }) => {
-  let rows = db.posts.filter((p) => p.status === "published" && notDeleted(p));
+  publishDue();
+  let rows = db.posts.filter(livePost);
   if (q.category) rows = rows.filter((p) => p.category === q.category);
   rows = sortBy(rows, "published_at", -1);
   const limit = Math.max(1, Math.min(Number(q.limit || 9), 30)); const page = Math.max(1, Number(q.page || 1));
   return { items: rows.slice((page - 1) * limit, page * limit).map((p) => pick(p, LIST)), total: rows.length, page, limit };
 });
 route("GET", "/public/posts/:slug", ({ params }) => {
-  const p = db.posts.find((x) => x.slug === params.slug && x.status === "published" && notDeleted(x)) || fail(404, "Article not found");
-  const related = sortBy(db.posts.filter((x) => x.status === "published" && notDeleted(x) && x.slug !== p.slug && x.category === p.category), "published_at", -1).slice(0, 3).map((x) => pick(x, LIST));
+  publishDue();
+  const p = db.posts.find((x) => x.slug === params.slug && livePost(x)) || fail(404, "Article not found");
+  const related = sortBy(db.posts.filter((x) => livePost(x) && x.slug !== p.slug && x.category === p.category), "published_at", -1).slice(0, 3).map((x) => pick(x, LIST));
   return { post: omit(p, ["author_id"]), related };
 });
 
@@ -313,7 +375,7 @@ export function statementData(oid, month) {
   const rents = db.rent_payments.filter((r) => r.owner_id === oid && r.period === month);
   const pids = db.properties.filter((p) => p.owner_id === oid).map((p) => p.id);
   const wos = db.work_orders.filter((w) => pids.includes(w.property_id) && w.charge_to === "owner" && ["completed", "closed"].includes(w.status) && (w.completed_at || "").startsWith(month));
-  const exps = wos.map((w) => ({ amount: w.actual_cost || 0, description: `${w.code} ${w.title}` }));
+  const exps = wos.map((w) => ({ amount: w.actual_cost || 0, description: `${w.code} ${w.title}`, property_id: w.property_id }));
   return [rents, exps, calcOwnerStatement(rents.map((r) => ({ amount: r.amount, fee_pct: r.mgmt_fee_pct || 0 })), exps)];
 }
 const arrearsOf = (ls) => r2((ls.schedule || []).filter((s) => s.due_date < todayIST()).reduce((t, s) => t + s.amount - s.paid, 0));

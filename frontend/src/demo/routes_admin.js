@@ -3,12 +3,14 @@
 import { route } from "./router";
 import {
   db, state, fail, nowIso, nowIstMin, todayIST, newId, r2, notDeleted, one, sortBy, pick, can, isScoped, inScope, getScoped,
-  audit, notify, notifyRoles, settings, ROLES, fileToDataUrl,
+  audit, notify, notifyRoles, settings, ROLES, fileToDataUrl, inBranches, publishDue,
 } from "./core";
 import { applyCommission } from "./routes_sales";
 import { doReverse, applyCreditNote, applyBookingCancel } from "./routes_money";
 
-const inRange = (v, frm, to) => (!frm || (v || "") >= frm) && (!to || (v || "").slice(0, 10) <= to);
+// like the server's range match: a record without the date never matches
+const inRange = (v, frm, to) => !!v && (!frm || v >= frm) && (!to || v.slice(0, 10) <= to);
+const inCsvRange = (v, frm, to) => (frm || "") <= v && v <= (to || "9999");
 const sum = (rows, f) => r2(rows.reduce((t, x) => t + (typeof f === "function" ? f(x) : x[f] || 0), 0));
 const addDays = (n) => { const d = new Date(`${todayIST()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
@@ -16,13 +18,14 @@ route("GET", "/dashboard", ({ user, query: q }) => {
   const { frm, to } = q;
   const t = todayIST();
   const out = { range: { from: frm || null, to: to || null } };
+  const bf = inBranches(user);
   if (can(user, "leads", "r")) {
     const L = db.leads.filter((l) => notDeleted(l) && inScope(user, "leads")(l));
     const byStage = {}; L.forEach((l) => { byStage[l.stage] = (byStage[l.stage] || 0) + 1; });
     const src = {}; L.filter((l) => inRange(l.created_at, frm, to)).forEach((l) => { const s = src[l.source] || (src[l.source] = { source: l.source, leads: 0, won: 0 }); s.leads += 1; if (l.stage === "won") s.won += 1; });
     out.leads = { new: L.filter((l) => inRange(l.created_at, frm, to)).length, awaiting_followup: L.filter((l) => !["won", "lost"].includes(l.stage) && l.next_follow_up && l.next_follow_up < nowIstMin()).length,
       qualified: L.filter((l) => ["qualified", "requirements", "matched", "site_visit", "negotiation"].includes(l.stage)).length, by_stage: byStage, by_source: Object.values(src) };
-    const V = db.site_visits.filter((v) => !isScoped(user, "leads") || v.agent_id === user.id);
+    const V = db.site_visits.filter((v) => bf(v) && (!isScoped(user, "leads") || v.agent_id === user.id));
     out.site_visits = { scheduled: V.filter((v) => v.status === "scheduled").length, requested: V.filter((v) => v.status === "requested").length, completed: V.filter((v) => v.status === "completed" && inRange(v.updated_at, frm, to)).length };
     const st = {}; L.filter((l) => l.assigned_to).forEach((l) => { const s = st[l.assigned_to] || (st[l.assigned_to] = { open: 0, won: 0, total: 0 }); s.total += 1; if (l.stage === "won") s.won += 1; else if (l.stage !== "lost") s.open += 1; });
     out.staff = Object.entries(st).map(([id, s]) => ({ name: one("users", (u) => u.id === id)?.name || "-", open: s.open, won: s.won, conversion: s.total ? Math.round((1000 * s.won) / s.total) / 10 : 0 }));
@@ -32,20 +35,23 @@ route("GET", "/dashboard", ({ user, query: q }) => {
     out.deals = { negotiating: D.filter((d) => ["negotiation", "agreement", "closing"].includes(d.stage)).length, closed: D.filter((d) => d.stage === "won" && inRange(d.closed_at, frm, to)).length };
   }
   if (can(user, "leases", "r") || can(user, "maintenance", "r")) {
-    const act = db.leases.filter((l) => l.status === "active");
+    const act = db.leases.filter((l) => bf(l) && l.status === "active");
     out.pm = { active_leases: act.length, expiring_60d: act.filter((l) => l.end_date <= addDays(60)).length,
-      vacant: db.properties.filter((p) => ["rent", "lease"].includes(p.transaction) && p.occupancy === "vacant" && ["published", "ready_to_market"].includes(p.status)).length,
-      open_work_orders: db.work_orders.filter((w) => ["open", "assigned", "in_progress"].includes(w.status)).length };
+      vacant: db.properties.filter((p) => bf(p) && notDeleted(p) && ["rent", "lease"].includes(p.transaction) && p.occupancy === "vacant" && ["published", "ready_to_market"].includes(p.status)).length,
+      open_work_orders: db.work_orders.filter((w) => bf(w) && ["open", "assigned", "in_progress"].includes(w.status)).length };
   }
   if (can(user, "shortstay", "r")) {
-    const B = db.bookings.filter((b) => b.status !== "cancelled" && inRange(b.check_in, frm, to));
+    const BB = db.bookings.filter(bf);
+    const B = BB.filter((b) => !["cancelled", "declined", "requested"].includes(b.status) && inRange(b.check_in, frm, to));
     const nights = B.reduce((s, b) => s + b.nights, 0);
-    out.shortstay = { bookings: B.length, gross: sum(B, "gross"), nights, adr: nights ? r2(sum(B, "room_revenue") / nights) : 0 };
+    out.shortstay = { bookings: B.length, gross: sum(B, "gross"), nights, adr: nights ? r2(sum(B, "room_revenue") / nights) : 0,
+      needs_details: BB.filter((b) => b.needs_details && b.status !== "cancelled").length, conflicts: BB.filter((b) => b.status === "conflict").length, requests: BB.filter((b) => b.status === "requested").length };
   }
   if (can(user, "finance", "r")) {
-    const open = db.deals.filter((d) => ["negotiation", "agreement", "closing"].includes(d.stage) && d.commission);
-    const invs = db.invoices.filter((i) => i.status !== "void");
-    const E = db.ledger_entries.filter((e) => e.ledger === "company" && inRange(e.posted_at, frm, to));
+    const open = db.deals.filter((d) => bf(d) && notDeleted(d) && ["negotiation", "agreement", "closing"].includes(d.stage) && d.commission);
+    const invs = db.invoices.filter((i) => bf(i) && i.status !== "void");
+    const LE = db.ledger_entries.filter(bf);
+    const E = LE.filter((e) => e.ledger === "company" && inRange(e.posted_at, frm, to));
     const rev = E.filter((e) => /^revenue:/.test(e.account));
     const collected = sum(rev.filter((e) => e.direction === "in"), "amount") - sum(rev.filter((e) => e.direction === "out"), "amount");
     const expenses = sum(E.filter((e) => e.direction === "out" && /^(expense|refund)/.test(e.account)), "amount");
@@ -54,23 +60,32 @@ route("GET", "/dashboard", ({ user, query: q }) => {
     for (let i = 5; i >= 0; i--) {
       let y = Number(t.slice(0, 4)); let m = Number(t.slice(5, 7)) - i; while (m <= 0) { m += 12; y -= 1; }
       const key = `${y}-${String(m).padStart(2, "0")}`;
-      const C = db.ledger_entries.filter((e) => e.ledger === "company" && (e.posted_at || "").startsWith(key));
+      const C = LE.filter((e) => e.ledger === "company" && (e.posted_at || "").startsWith(key));
       trend.push({ month: key, collected: sum(C.filter((e) => e.direction === "in" && /^revenue:/.test(e.account)), "amount"), expenses: sum(C.filter((e) => e.direction === "out" && /^expense/.test(e.account)), "amount") });
     }
     out.finance = { quoted_commission: sum(open.filter((d) => !d.commission.agreement_signed), (d) => d.commission.gross), expected_commission: sum(open.filter((d) => d.commission.agreement_signed), (d) => d.commission.gross),
-      earned_commission: sum(db.deals.filter((d) => d.stage === "won" && inRange(d.closed_at, frm, to)), "final_commission"), invoiced: sum(invs.filter((i) => inRange(i.issue_date, frm, to)), "total"),
+      earned_commission: sum(db.deals.filter((d) => bf(d) && d.stage === "won" && inRange(d.closed_at, frm, to)), "final_commission"), invoiced: sum(invs.filter((i) => inRange(i.issue_date, frm, to)), "total"),
       collected: r2(collected), receivables: sum(invs, (i) => i.total - i.paid - (i.credited || 0)),
       overdue_receivables: sum(invs.filter((i) => i.due_date < t && ["issued", "partially_paid"].includes(i.status)), (i) => i.total - i.paid - (i.credited || 0)),
-      expenses, operating_cash_flow: r2(collected - expenses), monthly_recurring_mgmt: sum(db.leases.filter((l) => l.status === "active"), (l) => (l.rent * l.mgmt_fee_pct) / 100),
+      expenses, operating_cash_flow: r2(collected - expenses), monthly_recurring_mgmt: sum(db.leases.filter((l) => bf(l) && l.status === "active"), (l) => (l.rent * l.mgmt_fee_pct) / 100),
       by_service: Object.entries(bySvc).map(([service, amount]) => ({ service, amount })), trend,
-      marketing_spend: sum(db.expenses.filter((e) => /^marketing/i.test(e.category) && inRange(e.date, frm, to)), "amount") };
+      marketing_spend: sum(db.expenses.filter((e) => bf(e) && /^marketing/i.test(e.category) && inRange(e.date, frm, to)), "amount") };
+  }
+  if (can(user, "customers", "r")) {
+    const C = db.customers.filter((c) => c.deleted !== true && !c.merged_into && inScope(user, "customers")(c));
+    out.customers = { total: C.length, new_this_month: C.filter((c) => (c.created_at || "") >= t.slice(0, 7)).length, with_consent: C.filter((c) => c.consent?.marketing).length };
+  }
+  if (can(user, "investors", "r")) {
+    const inv = db.investments.filter((i) => i.status === "active");
+    out.investors = { investors: db.investors.filter(notDeleted).length, active_investments: inv.length, capital: sum(inv, "amount") };
   }
   return out;
 }, { perm: ["dashboard", "r"] });
 
 // ---------------- Documents ----------------
-const ENTITY_MODULE = { property: "properties", lead: "leads", deal: "deals", lease: "leases", owner: "owners", booking: "shortstay", work_order: "maintenance", vendor: "maintenance", company: "settings", post: "cms" };
-const ENTITY_COLL = { property: "properties", lead: "leads", deal: "deals" };
+const ENTITY_MODULE = { property: "properties", lead: "leads", deal: "deals", lease: "leases", owner: "owners", booking: "shortstay", work_order: "maintenance", vendor: "maintenance", company: "settings", post: "cms",
+  customer: "customers", investor: "investors", inv_project: "investors", agreement: "agreements" };
+const ENTITY_COLL = { property: "properties", lead: "leads", deal: "deals", customer: "customers", agreement: "agreements" };
 const checkEntity = (u, type, id) => { const m = ENTITY_MODULE[type]; if (!m || !can(u, m, "r")) fail(404, "Record not found"); if (ENTITY_COLL[type]) getScoped(ENTITY_COLL[type], m, u, id); };
 const docOut = ({ stored_name, demo_url, ...d }) => d; // eslint-disable-line no-unused-vars
 
@@ -120,7 +135,14 @@ route("POST", "/documents/:id/approve-public", ({ user, params }) => {
 route("PATCH", "/documents/:id/share", ({ user, params, body }) => {
   const d = one("documents", (x) => x.id === params.id) || fail(404, "Not found");
   checkEntity(user, d.entity_type, d.entity_id);
-  if (!["property", "owner"].includes(d.entity_type) || d.doc_type === "kyc") fail(422, "Only property or owner documents (not KYC) can be shared with the owner");
+  if (d.doc_type === "kyc") fail(422, "KYC documents are never shared");
+  if (body.with === "investor") {
+    if (!["investor", "inv_project"].includes(d.entity_type)) fail(422, "Only investor or project documents can be shared with investors");
+    d.share_with_investor = !!body.share;
+    audit(user, d.share_with_investor ? "document_shared_investor" : "document_unshared_investor", "documents", d.id);
+    return { ok: true, share_with_investor: d.share_with_investor };
+  }
+  if (!["property", "owner"].includes(d.entity_type)) fail(422, "Only property or owner documents can be shared with the owner");
   d.share_with_owner = !!body.share;
   audit(user, d.share_with_owner ? "document_shared" : "document_unshared", "documents", d.id);
   return { ok: true, share_with_owner: d.share_with_owner };
@@ -132,10 +154,11 @@ route("GET", "/calendar", ({ user, query: q }) => {
   if (!frm || !to || frm.length !== 10 || to.length !== 10 || to < frm) fail(422, "Use from/to dates as YYYY-MM-DD");
   const ev = [];
   const end = `${to}T23:59`;
-  if (can(user, "leads", "r")) db.site_visits.filter((v) => (!isScoped(user, "leads") || v.agent_id === user.id) && v.scheduled_at >= frm && v.scheduled_at <= end && ["requested", "scheduled", "completed"].includes(v.status))
+  const bf = inBranches(user);
+  if (can(user, "leads", "r")) db.site_visits.filter((v) => bf(v) && (!isScoped(user, "leads") || v.agent_id === user.id) && v.scheduled_at >= frm && v.scheduled_at <= end && ["requested", "scheduled", "completed"].includes(v.status))
     .forEach((v) => ev.push({ type: "visit", date: v.scheduled_at.slice(0, 10), time: v.scheduled_at.slice(11, 16), title: `Visit · ${v.lead_name}`, sub: `${v.property_code} ${v.property_title}`, status: v.status, link: `/erp/leads/${v.lead_id}` }));
-  if (can(user, "shortstay", "r")) db.bookings.filter((b) => b.status !== "cancelled" && b.check_in <= to && b.check_out >= frm)
-    .forEach((b) => ev.push({ type: "stay", date: b.check_in, end: b.check_out, title: `Stay · ${b.guest_name}`, sub: `${b.code} ${b.property_title} (${b.nights} nights)`, status: b.status, link: "/erp/short-stay" }));
+  if (can(user, "shortstay", "r")) db.bookings.filter((b) => bf(b) && !["cancelled", "declined"].includes(b.status) && b.check_in <= to && b.check_out >= frm)
+    .forEach((b) => ev.push({ type: "stay", date: b.check_in, end: b.check_out, title: `Stay · ${b.guest_name || "Guest"}`, sub: `${b.code} ${b.property_title} (${b.nights} nights)`, status: b.status, link: "/erp/short-stay" }));
   if (can(user, "leases", "r")) db.leases.filter((l) => inScope(user, "leases")(l) && l.status === "active").forEach((l) => {
     if (frm <= l.end_date && l.end_date <= to) ev.push({ type: "lease_end", date: l.end_date, title: `Lease ends · ${l.tenant_name}`, sub: `${l.code} ${l.property_title}`, status: "active", link: "/erp/leases" });
     l.schedule.forEach((s) => { if (frm <= s.due_date && s.due_date <= to) ev.push({ type: "rent", date: s.due_date, title: `Rent due · ${l.tenant_name}`, sub: `${l.code} ${s.period}`, status: s.paid >= s.amount ? "paid" : "due", link: "/erp/leases" }); });
@@ -178,9 +201,13 @@ route("POST", "/automations/run", () => {
   db.leads.filter((l) => !["won", "lost"].includes(l.stage) && l.next_follow_up && l.next_follow_up < nowIstMin() && l.assigned_to).forEach((l) => { notify([l.assigned_to], `Overdue follow-up: ${l.name}`, l.next_follow_up, `/erp/leads/${l.id}`, `fu:${l.id}:${l.next_follow_up}`, "warning"); n += 1; });
   db.leases.filter((l) => l.status === "active" && l.end_date <= addDays(60)).forEach((l) => { notify([l.manager_id], `Lease expiring: ${l.code}`, `Ends ${l.end_date}`, "/erp/leases", `lexp:${l.id}`, "warning"); n += 1; });
   db.leases.filter((l) => l.status === "active").forEach((l) => { const due = l.schedule.filter((s) => s.due_date < t && s.paid < s.amount); if (due.length) { notify([l.manager_id], `Rent arrears: ${l.code}`, `${due.length} period(s) unpaid`, "/erp/leases", `arr:${l.id}:${due[due.length - 1].period}`, "warning"); n += 1; } });
-  db.invoices.filter((i) => ["issued", "partially_paid"].includes(i.status) && i.due_date < t).forEach((i) => { notifyRoles(["accountant"], `Invoice overdue: ${i.number}`, i.customer_name, "/erp/finance", `inv:${i.id}`, "warning"); n += 1; });
-  db.site_visits.filter((v) => v.status === "requested").forEach((v) => { notifyRoles(["branch_manager", "director"], `Visit request waiting: ${v.lead_name}`, `${v.property_code} · asked for ${v.scheduled_at}`, `/erp/leads/${v.lead_id}`, `vwait:${v.id}`, "warning"); n += 1; });
-  db.work_orders.filter((w) => ["open", "assigned", "in_progress"].includes(w.status) && w.due_date && w.due_date < t).forEach((w) => { notifyRoles(["branch_manager", "property_manager"], `Work order overdue: ${w.code}`, w.title, "/erp/maintenance", `wo_due:${w.id}`, "warning"); n += 1; });
+  db.invoices.filter((i) => ["issued", "partially_paid"].includes(i.status) && i.due_date < t).forEach((i) => { notifyRoles(["accountant"], `Invoice overdue: ${i.number}`, i.customer_name, "/erp/finance", `inv:${i.id}`, "warning", i.branch_id); n += 1; });
+  db.site_visits.filter((v) => v.status === "requested").forEach((v) => { notifyRoles(["branch_manager", "director"], `Visit request waiting: ${v.lead_name}`, `${v.property_code} · asked for ${v.scheduled_at}`, `/erp/leads/${v.lead_id}`, `vwait:${v.id}`, "warning", v.branch_id); n += 1; });
+  db.work_orders.filter((w) => ["open", "assigned", "in_progress"].includes(w.status) && w.due_date && w.due_date < t).forEach((w) => { notifyRoles(["branch_manager", "property_manager"], `Work order overdue: ${w.code}`, w.title, "/erp/maintenance", `wo_due:${w.id}`, "warning", w.branch_id); n += 1; });
+  db.bookings.filter((b) => b.needs_details && ["confirmed", "conflict"].includes(b.status) && b.check_in >= t && b.check_in <= addDays(7)).forEach((b) => { notifyRoles(["shortstay_ops", "branch_manager"], `Add guest details: ${b.code}`, `${b.property_title} · arrives ${b.check_in} (${b.platform})`, "/erp/short-stay", `bk_details:${b.id}`, "warning", b.branch_id); n += 1; });
+  db.bookings.filter((b) => b.status === "conflict").forEach((b) => { notifyRoles(["shortstay_ops", "branch_manager"], `Double booking: ${b.code}`, `${b.property_title} · ${b.check_in}`, "/erp/short-stay", `bk_conflict:${b.id}`, "warning", b.branch_id); n += 1; });
+  db.bookings.filter((b) => b.status === "requested").forEach((b) => { notifyRoles(["shortstay_ops", "branch_manager"], `Stay request waiting: ${b.guest_name}`, `${b.property_title} · ${b.check_in}`, "/erp/short-stay", `bk_req:${b.id}`, "warning", b.branch_id); n += 1; });
+  publishDue();
   return { checked: n };
 }, { perm: ["dashboard", "r"] });
 
@@ -212,7 +239,7 @@ route("POST", "/approvals/:id/decide", ({ user, params, body }) => {
 }, { auth: "staff" });
 
 // ---------------- Settings, audit, branches, campaigns ----------------
-const SETTINGS_FIELDS = ["name", "legal_name", "phone", "whatsapp", "email", "address", "gstin", "gst_enabled", "gst_rate", "cities", "localities", "approvals", "demo_mode", "invoice_due_days", "office_hours", "enquiry_routing", "rera_no", "social", "mfa_required_roles", "email_notifications", "map_center"];
+const SETTINGS_FIELDS = ["name", "legal_name", "phone", "whatsapp", "email", "address", "gstin", "gst_enabled", "gst_rate", "cities", "localities", "approvals", "demo_mode", "invoice_due_days", "office_hours", "enquiry_routing", "rera_no", "social", "mfa_required_roles", "email_notifications", "map_center", "agreement_signatory", "agreement_signatory_designation", "targets", "health_weights"];
 const CMS_FIELDS = ["hero_title", "hero_subtitle", "seo_title", "seo_description", "testimonials", "announcement"];
 route("GET", "/settings", ({ user }) => { if (!(can(user, "settings", "r") || can(user, "cms", "r"))) fail(403, "You do not have permission for this action"); return settings(); }, { auth: "staff" });
 route("PUT", "/settings", ({ user, body }) => {
@@ -226,6 +253,20 @@ route("PUT", "/settings", ({ user, body }) => {
     upd.mfa_required_roles = roles;
   }
   if ("testimonials" in upd) upd.testimonials = (upd.testimonials || []).filter((t) => t && t.quote).map((t) => ({ quote: String(t.quote).slice(0, 400), name: String(t.name || "").slice(0, 80) })).slice(0, 9);
+  if ("targets" in upd) {
+    const mr = upd.targets?.monthly_revenue || {};
+    const out = {};
+    Object.entries(mr).forEach(([k, v]) => { if (v != null && v !== "") { const n = Number(v); if (!Number.isFinite(n)) fail(422, "Targets must be amounts in rupees"); out[String(k).slice(0, 40)] = Math.max(0, n); } });
+    upd.targets = { monthly_revenue: out };
+  }
+  if ("health_weights" in upd) {
+    const keys = ["growth", "profit", "cash", "sales", "portfolio", "service"];
+    const w = {};
+    Object.entries(upd.health_weights || {}).forEach(([k, v]) => { if (keys.includes(k)) w[k] = Math.max(0, Math.min(100, parseInt(v, 10) || 0)); });
+    if (Object.keys(w).length && Object.values(w).every((x) => x === 0)) fail(422, "At least one part of the health score needs a weight");
+    upd.health_weights = w;
+  }
+  ["agreement_signatory", "agreement_signatory_designation"].forEach((k) => { if (k in upd) upd[k] = String(upd[k] || "").slice(0, 80); });
   if ("invoice_due_days" in upd) upd.invoice_due_days = Math.max(0, Math.min(120, Number(upd.invoice_due_days || 15)));
   Object.assign(settings(), upd);
   audit(user, "settings_updated", "settings", "company", upd);
@@ -246,7 +287,6 @@ route("POST", "/settings/logo", async ({ user, files }) => {
 }, { perm: ["settings", "w"] });
 route("DELETE", "/settings/logo", ({ user }) => { settings().logo = null; audit(user, "logo_removed", "settings", "company"); return { ok: true }; }, { perm: ["settings", "w"] });
 route("GET", "/audit", ({ query: q }) => sortBy(db.audit_logs.filter((a) => (!q.entity || a.entity === q.entity) && (!q.entity_id || a.entity_id === q.entity_id)), "at", -1).slice(0, 1000), { perm: ["audit", "r"] });
-route("GET", "/branches", () => db.branches, { auth: "staff" });
 route("GET", "/campaigns", () => db.campaigns.map((c) => ({ ...c, leads: db.leads.filter((l) => l.campaign_id === c.id).length, won: db.leads.filter((l) => l.campaign_id === c.id && l.stage === "won").length })), { perm: ["cms", "r"] });
 route("POST", "/campaigns", ({ body }) => {
   if (!body.name || !body.code) fail(422, "Name and code are required");
@@ -269,18 +309,38 @@ const REPORTS = {
   owner_statements: ["owner_statements", "finance", ["code", "owner_name", "month", "rent_collected", "management_fee", "expenses", "net_payable", "payout_status"]],
   site_visits: ["site_visits", "leads", ["lead_name", "property_code", "property_title", "scheduled_at", "status", "feedback", "source", "created_at"]],
   expenses: ["expenses", "finance", ["code", "date", "category", "description", "vendor", "amount", "gst_amount", "paid_from", "created_at"]],
+  customers: ["customers", "customers", ["code", "name", "phone", "email", "types", "city", "locality", "tags", "source", "created_at"]],
+  agreements: ["agreements", "agreements", ["code", "title", "template", "status", "party_names", "stamp_value", "estamp_no", "created_by_name", "created_at"]],
+  investments: ["investments", "investors", ["code", "investor_name", "project_name", "amount", "date", "method", "reference", "status", "exit_date", "exit_amount"]],
 };
+const DATE_COL = { deals: "closed_at", invoices: "issue_date", ledger: "posted_at", leases: "start_date", bookings: "check_in", owner_statements: "month", site_visits: "scheduled_at", expenses: "date", investments: "date" };
+const BRANCH_COLLS = ["leads", "deals", "properties", "leases", "bookings", "work_orders", "invoices", "ledger_entries", "site_visits", "expenses", "customers", "agreements"];
+export const csvCell = (v) => {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v.expiry || v.name || "";
+  if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? x.name : x)).join("; ");
+  const x = v ?? "";
+  return typeof x === "string" && "=+-@".includes(x[0] || " ") ? `'${x}` : x;
+};
+// Other CSV files (customers export, CEO report) register here: (path, query, user) => { cols, rows }
+const CSV_HANDLERS = [];
+export const csvRoute = (re, fn) => CSV_HANDLERS.push([re, fn]);
 export function csvReport(path) {
   const user = db.users.find((u) => u.id === state.userId);
-  const [, base, qs] = /^\/(?:reports\/)?([\w-]+)\.csv\??(.*)$/.exec(path) || [];
+  if (!user) return null;
+  const [p, qs] = path.split("?");
   const q = Object.fromEntries(new URLSearchParams(qs || ""));
-  const name = path.startsWith("/leads/export") ? "leads" : base;
+  const h = CSV_HANDLERS.find(([re]) => re.test(p));
+  if (h) { try { return h[1](p, q, user); } catch (e) { return { cols: ["Message"], rows: [[e.detail || "This export is not available for your role."]] }; } }
+  const [, base] = /^\/(?:reports\/)?([\w-]+)\.csv$/.exec(p) || [];
+  const name = p.startsWith("/leads/export") ? "leads" : base;
   const def = REPORTS[name];
-  if (!def || !user) return null;
+  if (!def) return null;
   const [coll, module, cols] = def;
   if (!(can(user, module, "r") && (can(user, module, "e") || can(user, "reports", "e")))) return { cols: ["Message"], rows: [["Your role cannot export this report."]] };
-  let rows = db[coll].filter((r) => (!["leads", "deals", "properties"].includes(coll) || notDeleted(r)) && (!["leads", "deals", "properties", "leases"].includes(module) || inScope(user, module)(r)));
-  if (q.frm || q.to) rows = rows.filter((r) => inRange(String(r[cols[cols.length - 2]] || r.created_at || "").slice(0, 10), q.frm, q.to));
+  const bf = inBranches(user);
+  let rows = db[coll].filter((r) => (!["leads", "deals", "properties", "customers", "investments"].includes(coll) || notDeleted(r))
+    && (!["leads", "deals", "properties", "leases", "customers"].includes(module) || inScope(user, module)(r)) && (!BRANCH_COLLS.includes(coll) || bf(r)));
+  if (q.frm || q.to) { const dc = DATE_COL[name] || "created_at"; rows = rows.filter((r) => inCsvRange(String(r[dc] || r.created_at || "").slice(0, 10), q.frm, q.to)); }
   audit(user, "export", "reports", name, { rows: rows.length });
-  return { cols, rows: rows.map((r) => cols.map((c) => (r[c] && typeof r[c] === "object" ? r[c].expiry || "" : r[c] ?? ""))) };
+  return { cols, rows: rows.map((r) => cols.map((c) => csvCell(r[c]))) };
 }

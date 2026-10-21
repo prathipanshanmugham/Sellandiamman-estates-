@@ -1,8 +1,9 @@
 """Builds the data for the hosted preview from the real backend.
 
 Runs the FastAPI app in-process on an in-memory database with the sample data, records the PDFs the server
-produces (invoices, receipts, rent receipts, owner statements, deal summaries, brochures) as page images, and
-writes a JSON snapshot of the collections. The preview's in-browser API (frontend/src/demo) starts from it.
+produces (invoices, receipts, rent receipts, owner statements, deal summaries, brochures, agreements, investor
+statements, the CEO report and the organisation chart) as page images, and writes a JSON snapshot of the
+collections plus the agreement templates and website defaults the preview needs. The preview's in-browser API (frontend/src/demo) starts from it.
 
     python demo/export.py            # writes frontend/src/demo/snapshot.json and demo/build/pdf/*.webp
 """
@@ -34,8 +35,11 @@ import pyotp  # noqa: E402
 from PIL import Image  # noqa: E402
 import server  # noqa: E402
 import routes_admin  # noqa: E402
+from datetime import timedelta  # noqa: E402
 from core import db, today_ist, now_iso  # noqa: E402
 from routes_auth import _qr_svg  # noqa: E402
+import agreements as A  # noqa: E402
+from site_defaults import DEFAULT_SITE, SECTION_TYPES  # noqa: E402
 
 DROP = {"sessions", "login_attempts", "password_reset_tokens", "booking_nights"}
 SECRET_FIELDS = ("password_hash", "mfa_secret", "mfa_pending_secret", "mfa_recovery")
@@ -98,6 +102,16 @@ async def main():
         for p in await db.properties.find({"listing_id": {"$ne": None}, "status": {"$in": ["published", "under_offer"]}},
                                           {"_id": 0}).to_list(200):
             await grab(f"/public/properties/{p['listing_id']}/brochure.pdf", f"brochure-{p['listing_id']}")
+        for i, a in enumerate(await db.agreements.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(200)):
+            await grab(f"/agreements/{a['id']}/pdf", f"agreement-{i}", (f"/agreements/{a['id']}/docx",))
+        portal_inv = await db.users.find_one({"role": "investor"}, {"_id": 0})
+        for i, inv in enumerate(await db.investors.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(100)):
+            also = ("/investor/statement.pdf",) if portal_inv and portal_inv.get("investor_id") == inv["id"] else ()
+            await grab(f"/investors/{inv['id']}/statement.pdf", f"investor-statement-{i}", also)
+        t = today_ist()
+        frm = (t - timedelta(days=89)).isoformat()
+        await grab(f"/ceo/report.pdf?frm={frm}&to={t.isoformat()}&branch=all", "ceo-report", ("/ceo/report.pdf",))
+        await grab("/team/org.pdf", "org-chart")
         for i, d in enumerate(await db.documents.find({"content_type": "application/pdf"}, {"_id": 0}).to_list(200)):
             link = (await c.post(f"/api/documents/{d['id']}/link")).json()["url"]
             res = await c.get(link)
@@ -120,8 +134,17 @@ async def main():
         snap[name] = rows
     secret = "JBSWY3DPEHPK3PXPSELLANDIAM"[:32]
     uri = pyotp.TOTP(secret).provisioning_uri(name="you@sellandiamman.example", issuer_name="Sellandiamman Estates")
+    def stamp_of(t):
+        if t["stamp"] is A._lease_stamp:
+            return {"kind": "lease"}
+        if t["stamp"] is A._sale_stamp:
+            return {"kind": "sale"}
+        x = t["stamp"]({})
+        return {"kind": "flat", "rate": x["rate"], "duty": x["duty"]}
+    templates = {k: {**{f: v for f, v in t.items() if f != "stamp"}, "stamp": stamp_of(t)} for k, t in A.TEMPLATES.items()}
     meta = {"exported_at": now_iso(), "today": today_ist().isoformat(), "pdfs": pdfs,
-            "mfa_demo": {"secret": secret, "otpauth_uri": uri, "qr_svg": _qr_svg(uri)}}
+            "mfa_demo": {"secret": secret, "otpauth_uri": uri, "qr_svg": _qr_svg(uri)},
+            "agreement_templates": templates, "site_defaults": DEFAULT_SITE, "section_types": SECTION_TYPES}
     OUT_JSON.write_text(json.dumps({"meta": meta, "db": snap}, default=str, separators=(",", ":")))
     size = OUT_JSON.stat().st_size
     print(f"snapshot: {len(snap)} collections, {size / 1024:.0f} KB; pdf images: {len(list(OUT_PDF.iterdir()))}")

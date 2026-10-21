@@ -460,8 +460,15 @@ class _Safe(dict):
         return "________________"
 
 
+def _txt(v):
+    """5.0 prints as 5 (numbers from forms and the database arrive as floats)."""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return v if isinstance(v, str) else str(v)
+
+
 def fill(text, ctx):
-    return text.format_map(_Safe({k: (str(v) if not isinstance(v, str) else v) for k, v in ctx.items()}))
+    return text.format_map(_Safe({k: _txt(v) for k, v in ctx.items()}))
 
 
 def render_blocks(tpl_key, data, company, clauses=None, extra_clauses=None):

@@ -6,30 +6,49 @@ import { Eye, X, FileText } from "lucide-react";
 import { api, asset, errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
-import { META, db } from "./core";
+import { META, db, state } from "./core";
 import { csvReport } from "./routes_admin";
+import { customerData } from "./routes_customers";
+import { agreementFor, agreementBlocks, stampLine } from "./routes_agreements";
+import { Paper } from "../pages/erp/Agreements";
 
 const D = "@demo.sellandiamman.test";
-const ROLES = [["admin", "Super admin", "Everything, incl. users and settings"], ["director", "Director", "All business areas and approvals"], ["branch.manager", "Branch manager", "Leads, listings, leases, short stays"], ["sales.agent", "Sales agent", "Own leads, deals and listings"], ["property.manager", "Property manager", "Leases, rent, maintenance"], ["accountant", "Accountant", "Invoices, ledgers, payouts"], ["marketing", "Marketing", "Listings, Insights, campaigns"], ["shortstay.ops", "Short-stay ops", "Bookings and cleaning"], ["auditor", "Auditor", "Read-only, reports, audit log"], ["owner", "Owner portal", "Meena Krishnan, a property owner"]];
+const ROLES = [["admin", "Super admin", "Everything, incl. users and settings"], ["director", "Director (CEO)", "All branches, CEO dashboard, approvals"], ["perundurai.manager", "Head office manager", "Perundurai branch only"], ["branch.manager", "Branch manager", "Erode branch: leads, listings, leases, stays"], ["namakkal.manager", "Namakkal manager", "Namakkal branch only"], ["sales.agent", "Sales agent", "Own leads, deals and listings"], ["property.manager", "Property manager", "Leases, rent, maintenance"], ["accountant", "Accountant", "Invoices, ledgers, payouts"], ["marketing", "Marketing", "Listings, Insights, campaigns"], ["shortstay.ops", "Short-stay ops", "Bookings and cleaning"], ["auditor", "Auditor", "Read-only, reports, audit log"], ["owner", "Owner portal", "Meena Krishnan, a property owner"], ["investor", "Investor portal", "Suresh Palanisamy, a co-investor"]];
 
 function sampleFor(path) {
-  const kinds = [[/^\/invoices\//, "invoice-"], [/^\/payments\//, "receipt-"], [/^\/deals\//, "deal-"], [/rent-receipts|rent-payments/, "rent-"], [/statement/, "statement-"], [/brochure/, "brochure-"]];
+  const kinds = [[/^\/investors?\/.*statement/, "investor-statement-"], [/^\/agreements\//, "agreement-"], [/^\/ceo\/report/, "ceo-report"], [/^\/team\/org/, "org-chart"], [/^\/invoices\//, "invoice-"], [/^\/payments\//, "receipt-"], [/^\/deals\//, "deal-"], [/rent-receipts|rent-payments/, "rent-"], [/statement/, "statement-"], [/brochure/, "brochure-"]];
   const k = kinds.find(([re]) => re.test(path));
   if (!k) return null;
   const hit = Object.entries(META.pdfs).find(([, files]) => files[0].startsWith(k[1]));
   return hit ? hit[1] : null;
 }
 
+const me = () => db.users.find((u) => u.id === state.userId);
 function resolve(path, meta) {
   if (/\.csv(\?|$)/.test(path) || meta.csv) return { kind: "csv", data: csvReport(path) };
+  const cj = /^\/customers\/([^/]+)\/data\.json$/.exec(path);
+  if (cj) { try { return { kind: "json", text: JSON.stringify(customerData(me(), cj[1]), null, 2) }; } catch (e) { return { kind: "note", text: e.detail || "Not available." }; } }
+  const ag = /^\/agreements\/([^/]+)\/(pdf|docx)$/.exec(path);
+  if (ag) {
+    let a;
+    try { a = agreementFor(me(), ag[1]); } catch (e) { return { kind: "note", text: e.detail || "Not available." }; }
+    const word = ag[2] === "docx" ? "The Word (.docx) file has the same layout and can be edited in Word or Google Docs." : null;
+    if (META.pdfs[path] && (a.updated_at || "") <= META.exported_at) return { kind: "pdf", files: META.pdfs[path], note: word };
+    return { kind: "agreement", blocks: agreementBlocks(a), stampTop: a.stamp_top_mm ?? 100, stampLine: stampLine(a),
+      note: `On the live site this downloads as a ${ag[2] === "pdf" ? "PDF" : "Word (.docx)"} file in stamp-paper layout, with the parties' initials and page numbers on every page.` };
+  }
   const doc = /^\/files\/demo-([\w-]+)/.exec(path);
   if (doc) {
     const d = db.documents.find((x) => x.id === doc[1]);
     if (META.pdfs[`doc:${doc[1]}`]) return { kind: "pdf", files: META.pdfs[`doc:${doc[1]}`] };
     if (d?.demo_url && d.content_type?.startsWith("image/")) return { kind: "image", src: d.demo_url };
+    const fa = d?.agreement_id && db.agreements.find((x) => x.id === d.agreement_id);
+    if (fa) return { kind: "agreement", blocks: agreementBlocks(fa), stampTop: fa.stamp_top_mm ?? 100, stampLine: stampLine(fa), note: "The finalised PDF saved with this record. On the live site it opens as the PDF file." };
     return { kind: "note", text: "This file was added in the preview. On the live server it opens through a 5-minute private link." };
   }
   if (META.pdfs[path]) return { kind: "pdf", files: META.pdfs[path] };
+  const bare = path.split("?")[0];
+  if (bare !== path && META.pdfs[bare]) return { kind: "pdf", files: META.pdfs[bare], note: "Recorded with the default dates and filters. The live server builds the PDF for exactly what you chose." };
   const s = sampleFor(path);
   if (s) return { kind: "pdf", files: s, note: "This record was created in the preview. The live server builds its own PDF; this is a recorded example of the same document." };
   return { kind: "note", text: "This file is produced by the live server." };
@@ -46,10 +65,12 @@ function Viewer() {
     <Dialog open={!!v} onOpenChange={(o) => !o && setV(null)}>
       <DialogContent className="max-h-[92vh] max-w-[min(56rem,calc(100vw-1.5rem))] overflow-y-auto rounded-sm p-4 sm:p-6" data-testid="demo-file-viewer">
         <DialogHeader><DialogTitle className="flex items-center gap-2 font-heading"><FileText size={18} />{v?.meta?.name || (v?.kind === "csv" ? "Export" : "Document")}</DialogTitle>
-          <DialogDescription className="text-xs text-slate-500">{v?.kind === "csv" ? "Spreadsheet export (CSV). On the live site this downloads as a file." : v?.kind === "pdf" ? "PDF made by the server. On the live site this opens as a file you can download, print or send." : "Preview"}</DialogDescription></DialogHeader>
+          <DialogDescription className="text-xs text-slate-500">{v?.kind === "csv" ? "Spreadsheet export (CSV). On the live site this downloads as a file." : v?.kind === "pdf" ? "PDF made by the server. On the live site this opens as a file you can download, print or send." : v?.kind === "json" ? "Everything held about this person (data access request). On the live site this downloads as a JSON file." : v?.kind === "agreement" ? "Agreement in stamp-paper layout" : "Preview"}</DialogDescription></DialogHeader>
         {v?.note && <p className="bg-amber-50 p-2 text-xs text-amber-900">{v.note}</p>}
         {v?.kind === "pdf" && <div className="space-y-3 bg-slate-100 p-2 sm:p-4">{v.files.map((f) => <img key={f} src={asset(`/pdf/${f}`)} alt="Document page" className="mx-auto w-full max-w-3xl border border-slate-200 bg-white shadow-sm" />)}</div>}
         {v?.kind === "image" && <img src={v.src} alt="" className="mx-auto max-h-[70vh] w-auto" />}
+        {v?.kind === "agreement" && <div className="bg-slate-200 p-2 sm:p-4"><Paper blocks={v.blocks} stampTop={Number(v.stampTop) || 0} stampLine={v.stampLine} /></div>}
+        {v?.kind === "json" && <pre className="max-h-[65vh] overflow-auto bg-slate-50 p-3 text-[11px] leading-4">{v.text}</pre>}
         {v?.kind === "note" && <p className="text-sm text-slate-600">{v.text}</p>}
         {v?.kind === "csv" && v.data && <div className="max-h-[65vh] overflow-auto border border-slate-200"><table className="tbl w-full"><thead><tr>{v.data.cols.map((c) => <th key={c}>{c}</th>)}</tr></thead><tbody>{v.data.rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} className="whitespace-nowrap">{String(c)}</td>)}</tr>)}</tbody></table></div>}
         {v?.kind === "csv" && v.data && <p className="text-xs text-slate-500">{v.data.rows.length} rows</p>}
@@ -69,7 +90,7 @@ function Switcher() {
       if (user) await api.post("/auth/logout").catch(() => {});
       const { data } = await api.post("/auth/login", { email: `${key}${D}`, password: "Demo@12345" });
       if (data.mfa_required) { setOpen(false); nav("/erp/login"); return; }
-      await refresh(); setOpen(false); nav(key === "owner" ? "/owner" : "/erp");
+      await refresh(); setOpen(false); nav({ owner: "/owner", investor: "/investor" }[key] || "/erp");
     } catch (e) { setErr(errMsg(e)); }
   };
   return (

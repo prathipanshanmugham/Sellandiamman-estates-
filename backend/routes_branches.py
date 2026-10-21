@@ -313,6 +313,7 @@ def org_pdf_bytes(company, people, branches):
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas
+    from reportlab.pdfbase.pdfmetrics import stringWidth
     from pdf import draw_mark, INK, MUTED, RULE
     bname = {b["id"]: b["name"] for b in branches}
     W, H = landscape(A3)
@@ -332,7 +333,8 @@ def org_pdf_bytes(company, people, branches):
     header("Organisation chart")
     pos, width, kids = _layout(people)
     levels = max([lv for _, lv in pos.values()] or [0]) + 1
-    box_w, box_h, gap_x, gap_y = 58 * mm, 24 * mm, 6 * mm, 12 * mm
+    # narrow cards so a wide team still prints at a readable size on A3
+    box_w, box_h, gap_x, gap_y = 49 * mm, 24 * mm, 3.5 * mm, 12 * mm
     slot = box_w + gap_x
     scale = min(1.0, (W - 30 * mm) / max(1, width * slot), (H - 45 * mm) / max(1, levels * (box_h + gap_y)))
     ox = (W - width * slot * scale) / 2
@@ -362,16 +364,20 @@ def org_pdf_bytes(company, people, branches):
         c.setFillColor(colors.HexColor("#0F172A"))
         c.rect(cx - w / 2, top - 1.4 * mm * scale, w, 1.4 * mm * scale, fill=1, stroke=0)
         fs = 8.6 * scale
-        c.setFont("Helvetica-Bold", fs)
-        c.drawCentredString(cx, top - 6 * mm * scale, p["name"][:34])
-        c.setFont("Helvetica", fs * 0.86)
-        c.setFillColor(MUTED)
-        c.drawCentredString(cx, top - 10 * mm * scale, (p.get("designation") or p.get("role_label") or "")[:42])
-        br = ", ".join(bname.get(b, "") for b in (p.get("branch_ids") or [])) or "All branches"
-        c.drawCentredString(cx, top - 13.6 * mm * scale, br[:44])
-        c.setFillColor(INK)
-        c.drawCentredString(cx, top - 17.4 * mm * scale, (p.get("phone") or "")[:24])
-        c.drawCentredString(cx, top - 21 * mm * scale, (p.get("email") or "")[:42])
+
+        def fit(text, y, font, size, color):
+            """Centred text, made smaller when it would run past the card's edges."""
+            text = str(text or "")[:60]
+            room = w - 2.4 * mm * scale
+            width = stringWidth(text, font, size)
+            c.setFont(font, size * min(1.0, room / width) if width else size)
+            c.setFillColor(color)
+            c.drawCentredString(cx, top - y * mm * scale, text)
+        fit(p["name"], 6, "Helvetica-Bold", fs, colors.HexColor("#0F172A"))
+        fit(p.get("designation") or p.get("role_label"), 10, "Helvetica", fs * 0.86, MUTED)
+        fit(", ".join(bname.get(b, "") for b in (p.get("branch_ids") or [])) or "All branches", 13.6, "Helvetica", fs * 0.86, MUTED)
+        fit(p.get("phone"), 17.4, "Helvetica", fs * 0.86, INK)
+        fit(p.get("email"), 21, "Helvetica", fs * 0.86, INK)
     c.setFont("Helvetica", 7)
     c.setFillColor(MUTED)
     c.drawString(15 * mm, 9 * mm, "Organisation chart · internal contact list, do not share outside the company")

@@ -3,6 +3,7 @@ import { route } from "./router";
 import {
   db, fail, nowIso, nowIstMin, todayIST, newId, notDeleted, one, sortBy, pick, rx, nextCode, inr, normalizePhone, settings, can, isScoped,
   inScope, getScoped, audit, notify, notifyRoles, postLedger, LEAD_STAGES, PROPERTY_FLOW, calcCommission,
+  checkBranch, homeBranch, headOfficeId, branchForPlace, inBranch, inBranches, linkCustomer, ensurePlace, geoFields,
 } from "./core";
 import { createUser } from "./routes_site";
 
@@ -14,13 +15,30 @@ export function addActivity(leadId, kind, notes, user = null, extra = {}) {
   db.lead_activities.push({ id: newId(), lead_id: leadId, kind, notes, user_id: user?.id || null, user_name: user ? user.name : "System", created_at: nowIso(), ...extra });
 }
 
+// Branch for a lead from the places it mentions ("Thindal, Nasiyanur"), else the head office.
+function branchFromText(text) {
+  if (text) {
+    const words = String(text).split(/[,/;&]| and /).map((w) => w.trim().toLowerCase()).filter(Boolean);
+    const rows = db.locations.filter((l) => l.active !== false);
+    for (const kind of ["locality", "city"]) {
+      const r = rows.find((x) => x.kind === kind && words.includes(x.name.toLowerCase()));
+      if (r) return r.branch_id || branchForPlace(r.city);
+    }
+  }
+  return headOfficeId();
+}
+const LEAD_TYPE = { buyer: "buyer", seller: "seller", tenant: "tenant", landlord: "landlord", investor: "investor", business: "business" };
+
 export function createLead(data, user, note) {
   const dup = db.leads.find((l) => l.phone === data.phone && !["won", "lost"].includes(l.stage) && notDeleted(l));
   if (dup && !data.force) { addActivity(dup.id, "duplicate_enquiry", note || "Repeat enquiry received", user); return [dup, true]; }
   const lead = { id: newId(), code: nextCode("lead", "SE-LD-", 5), stage: "new", deleted: false, created_at: nowIso(), updated_at: nowIso(), created_by: user?.id || null, contacts: [], lost_reason: null, next_follow_up: null,
     ...pick(data, ["name", "phone", "email", "organization", "customer_type", "source", "interest", "budget_min", "budget_max", "preferred_locations", "requirements", "property_id", "assigned_to", "branch_id", "next_follow_up", "preferred_contact", "utm_source", "campaign_id"]),
     consent: { marketing: !!data.marketing_consent, recorded_at: nowIso() } };
+  if (!lead.branch_id) lead.branch_id = branchFromText(lead.preferred_locations);
   db.leads.push(lead);
+  linkCustomer("leads", lead.id, { name: lead.name, phone: lead.phone, email: lead.email, organization: lead.organization, types: [LEAD_TYPE[lead.customer_type] || "buyer"], source: lead.source,
+    branch_id: lead.branch_id, rm_id: lead.assigned_to, preferred_contact: lead.preferred_contact, marketing_consent: data.marketing_consent }, user);
   addActivity(lead.id, "created", note || "Lead created", user);
   if (lead.assigned_to) notify([lead.assigned_to], `New lead assigned: ${lead.name}`, lead.requirements || "", `/erp/leads/${lead.id}`, `assign:${lead.id}:${lead.assigned_to}`);
   return [lead, false];
@@ -47,7 +65,8 @@ route("POST", "/leads", ({ user, body }) => {
   if (String(d.name || "").trim().length < 2) fail(422, "name: at least 2 characters");
   d.phone = normalizePhone(d.phone);
   if (isScoped(user, "leads")) d.assigned_to = user.id;
-  if (!d.branch_id && user.branch_ids?.length) d.branch_id = user.branch_ids[0];
+  if (d.branch_id) checkBranch(user, d.branch_id);
+  else d.branch_id = homeBranch(user) || branchFromText(d.preferred_locations);
   const ex = db.leads.find((l) => l.phone === d.phone && !["won", "lost"].includes(l.stage) && notDeleted(l));
   if (ex && !d.force) fail(409, `Possible duplicate: open lead ${ex.code} (${ex.name}) has this phone`);
   const [lead] = createLead({ ...d, force: true }, user);
@@ -85,6 +104,7 @@ route("PATCH", "/leads/:id", ({ user, params, body }) => {
   const upd = { ...body };
   validate(upd);
   if ("assigned_to" in upd && isScoped(user, "leads")) fail(403, "Only managers can reassign leads");
+  if (upd.branch_id) checkBranch(user, upd.branch_id);
   if ("stage" in upd) {
     if (!LEAD_STAGES.includes(upd.stage)) fail(422, "Invalid stage");
     if (upd.stage === "lost" && !(upd.lost_reason || l.lost_reason)) fail(422, "A lost reason is required");
@@ -116,7 +136,7 @@ route("POST", "/leads/:id/site-visits", ({ user, params, body }) => {
   const l = getScoped("leads", "leads", user, params.id);
   const p = one("properties", (x) => x.id === body.property_id && notDeleted(x)) || fail(404, "Property not found");
   if (!body.scheduled_at) fail(422, "scheduled_at: required");
-  const v = { id: newId(), lead_id: l.id, lead_name: l.name, property_id: p.id, property_title: p.title, property_code: p.code, scheduled_at: body.scheduled_at, status: "scheduled", notes: body.notes || null, agent_id: l.assigned_to || user.id, created_at: nowIso() };
+  const v = { id: newId(), lead_id: l.id, lead_name: l.name, property_id: p.id, property_title: p.title, property_code: p.code, scheduled_at: body.scheduled_at, status: "scheduled", notes: body.notes || null, agent_id: l.assigned_to || user.id, branch_id: l.branch_id || null, created_at: nowIso() };
   db.site_visits.push(v);
   if (LEAD_STAGES.indexOf(l.stage) < LEAD_STAGES.indexOf("site_visit")) { addActivity(l.id, "stage_change", `Stage: ${l.stage} → site_visit`, user); l.stage = "site_visit"; }
   addActivity(l.id, "site_visit", `Site visit scheduled at ${p.code} for ${body.scheduled_at}`, user);
@@ -124,7 +144,7 @@ route("POST", "/leads/:id/site-visits", ({ user, params, body }) => {
   return v;
 }, { perm: ["leads", "w"] });
 
-route("GET", "/site-visits", ({ user }) => sortBy(db.site_visits.filter((v) => !isScoped(user, "leads") || v.agent_id === user.id), "scheduled_at", -1), { perm: ["leads", "r"] });
+route("GET", "/site-visits", ({ user }) => sortBy(db.site_visits.filter((v) => (!isScoped(user, "leads") || v.agent_id === user.id) && inBranches(user)(v)), "scheduled_at", -1), { perm: ["leads", "r"] });
 
 route("PATCH", "/site-visits/:id", ({ user, params, body }) => {
   const v = one("site_visits", (x) => x.id === params.id) || fail(404, "Visit not found");
@@ -177,13 +197,17 @@ route("POST", "/leads/:id/share-listings", ({ user, params, body }) => {
 route("POST", "/leads/:id/anonymise", ({ user, params, body }) => {
   const l = getScoped("leads", "leads", user, params.id);
   if (!body.confirm) fail(422, "Confirm that the customer asked for their data to be removed");
+  anonymiseLeadRecord(l, user, body.reason);
+  return { ok: true };
+}, { perm: ["leads", "a"] });
+
+export function anonymiseLeadRecord(l, user, reason = null) {
   Object.assign(l, { name: "Anonymised contact", phone: null, email: null, organization: null, requirements: null, preferred_locations: null, contacts: [], utm_source: null, anonymised: true, anonymised_at: nowIso(),
     consent: { marketing: false, recorded_at: nowIso() }, stage: ["won", "lost"].includes(l.stage) ? l.stage : "lost", lost_reason: l.lost_reason || "data_removal_request", updated_at: nowIso() });
   db.lead_activities.filter((a) => a.lead_id === l.id).forEach((a) => { a.notes = "[removed on request]"; a.outcome = null; });
   db.site_visits.filter((v) => v.lead_id === l.id).forEach((v) => Object.assign(v, { lead_name: "Anonymised contact", feedback: null, notes: null }));
-  audit(user, "lead_anonymised", "leads", l.id, { code: l.code, reason: body.reason });
-  return { ok: true };
-}, { perm: ["leads", "a"] });
+  audit(user, "lead_anonymised", "leads", l.id, { code: l.code, reason });
+}
 
 route("POST", "/leads/:id/convert", ({ user, params, body }) => {
   const l = getScoped("leads", "leads", user, params.id);
@@ -201,8 +225,8 @@ route("POST", "/leads/:id/convert", ({ user, params, body }) => {
 
 // ---------------- Properties & owners ----------------
 const CATEGORIES = ["residential", "apartment", "villa", "land", "agricultural", "commercial", "shop", "office", "industrial", "warehouse", "factory_shed", "other"];
-const EDITABLE = ["title", "category", "transaction", "ownership_type", "owner_id", "branch_id", "city", "locality", "pincode", "internal_address", "public_lat", "public_lng", "survey_no", "plot_area", "built_area", "area_unit", "bedrooms", "bathrooms", "furnishing", "amenities", "price", "price_unit", "price_on_request", "negotiated_terms", "description_public", "notes_internal", "images", "availability", "occupancy", "assigned_agent", "assigned_manager", "source", "service_type", "power_supply", "loading_access", "parking", "checkin_instructions", "video_url", "mgmt_fee_pct", "nightly_rate", "max_guests", "service_agreement"];
-const RESTRICTED = ["internal_address", "notes_internal", "survey_no", "checkin_instructions", "negotiated_terms", "service_agreement", "owner_id"];
+const EDITABLE = ["title", "category", "transaction", "ownership_type", "owner_id", "branch_id", "city", "locality", "pincode", "internal_address", "public_lat", "public_lng", "survey_no", "plot_area", "built_area", "area_unit", "bedrooms", "bathrooms", "furnishing", "amenities", "price", "price_unit", "price_on_request", "negotiated_terms", "description_public", "notes_internal", "images", "availability", "occupancy", "assigned_agent", "assigned_manager", "source", "service_type", "power_supply", "loading_access", "parking", "checkin_instructions", "video_url", "mgmt_fee_pct", "nightly_rate", "max_guests", "service_agreement", "geo", "location_public"];
+const RESTRICTED = ["internal_address", "notes_internal", "survey_no", "checkin_instructions", "negotiated_terms", "service_agreement", "owner_id", "geo"];
 const viewFor = (u, p) => { const o = { ...p }; if (!can(u, "shortstay", "r")) delete o.checkin_instructions; if (u.role === "marketing") RESTRICTED.forEach((k) => delete o[k]); return o; };
 
 route("GET", "/properties", ({ user, query: q }) => {
@@ -224,9 +248,17 @@ route("POST", "/properties", ({ user, body }) => {
   }
   delete d.force;
   if (isScoped(user, "properties")) d.assigned_agent = user.id;
-  if (!d.branch_id && user.branch_ids?.length) d.branch_id = user.branch_ids[0];
-  if (!d.branch_id) d.branch_id = { erode: "br-erode", perundurai: "br-perundurai" }[String(d.city).trim().toLowerCase()] || null;
-  const p = { amenities: [], images: [], area_unit: "sq.ft", availability: "Immediate", occupancy: "vacant", ...pick(d, EDITABLE), id: newId(), code: nextCode("property", "SE-P-"), status: "draft", verification: { status: "not_started" }, authorization: {},
+  if (d.location_public && !["approximate", "exact", "hidden"].includes(d.location_public)) fail(422, "Invalid location setting");
+  if (d.branch_id) checkBranch(user, d.branch_id);
+  else {
+    // the branch that covers the town, unless that is outside the person's own branches
+    const place = branchForPlace(d.city, d.locality);
+    d.branch_id = inBranch(user, place) ? place : homeBranch(user) || place;
+  }
+  const g = geoFields(d.geo, d.location_public || "approximate", user);
+  delete d.geo;
+  ensurePlace(String(d.city).trim(), String(d.locality).trim(), d.pincode || null, g.geo?.lat ?? null, g.geo?.lng ?? null, d.branch_id, user.id);
+  const p = { amenities: [], images: [], area_unit: "sq.ft", availability: "Immediate", occupancy: "vacant", location_public: "approximate", ...pick(d, EDITABLE), ...g, id: newId(), code: nextCode("property", "SE-P-"), status: "draft", verification: { status: "not_started" }, authorization: {},
     publication_history: [], featured: false, listing_id: null, created_by: user.id, created_at: nowIso(), updated_at: nowIso(), deleted: false };
   db.properties.push(p);
   audit(user, "property_created", "properties", p.id);
@@ -248,6 +280,14 @@ route("PATCH", "/properties/:id", ({ user, params, body }) => {
   if ("category" in upd && !CATEGORIES.includes(upd.category)) fail(422, "Invalid category");
   if (upd.pincode && !/^\d{6}$/.test(String(upd.pincode))) fail(422, "PIN code must be 6 digits");
   ["price", "plot_area", "built_area", "mgmt_fee_pct", "nightly_rate"].forEach((k) => { if (upd[k] != null && upd[k] !== "" && Number(upd[k]) < 0) fail(422, `${k} cannot be negative`); });
+  if (upd.branch_id) checkBranch(user, upd.branch_id);
+  if ("geo" in upd || "location_public" in upd) {
+    const geo = upd.geo || p.geo; delete upd.geo;
+    const mode = upd.location_public || p.location_public || "approximate";
+    const g = geoFields(geo, mode, user, geo?.source || "pin");
+    if (Object.keys(g).length) Object.assign(upd, g); else if (mode === "hidden") Object.assign(upd, { public_lat: null, public_lng: null });
+  }
+  if (upd.city || upd.locality) ensurePlace(upd.city || p.city, upd.locality || p.locality, upd.pincode || p.pincode, null, null, p.branch_id, user.id);
   upd.updated_at = nowIso();
   Object.assign(p, upd);
   audit(user, "property_updated", "properties", p.id, upd);
@@ -309,6 +349,7 @@ route("POST", "/owners", ({ user, body }) => {
   if (db.owners.some((o) => o.phone === phone && notDeleted(o))) fail(409, "An owner with this phone already exists");
   const o = { kind: "individual", is_nri: false, preferred_contact: "phone", ...pick(body, ["name", "email", "kind", "is_nri", "address", "preferred_contact", "representative_name", "representative_phone", "notes"]), phone, id: newId(), code: nextCode("owner", "SE-O-"), created_at: nowIso(), deleted: false };
   db.owners.push(o);
+  linkCustomer("owners", o.id, { name: o.name, phone: o.phone, email: o.email, types: ["owner", "landlord"], source: "direct", address: o.address, kind: o.kind === "company" ? "business" : "individual" }, user);
   audit(user, "owner_created", "owners", o.id);
   return o;
 }, { perm: ["owners", "w"] });
@@ -426,7 +467,7 @@ route("POST", "/deals/:id/close", ({ user, params }) => {
   if (["won", "cancelled"].includes(d.stage)) fail(409, "Deal is already closed");
   Object.assign(d, { stage: "won", closed_at: nowIso(), final_commission: c.gross, company_net_commission: c.company_net });
   d.history.push({ at: nowIso(), by: user.name, event: "Deal closed (won)" });
-  (c.splits || []).forEach((s) => postLedger("commission_payable", "in", s.amount, "deal", d.id, `${s.kind} commission payable to ${s.party} (${d.code})`, user, s.party));
+  (c.splits || []).forEach((s) => postLedger("commission_payable", "in", s.amount, "deal", d.id, `${s.kind} commission payable to ${s.party} (${d.code})`, user, s.party, null, d.branch_id));
   const p = one("properties", (x) => x.id === d.property_id);
   if (p) Object.assign(p, { status: "closed", closed_as: { sale: "sold", rent: "rented", lease: "leased" }[d.deal_type], updated_at: nowIso() });
   const l = d.lead_id && one("leads", (x) => x.id === d.lead_id);

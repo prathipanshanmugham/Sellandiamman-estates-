@@ -1,6 +1,6 @@
 // Routing for the preview's in-browser API: matches method + path, checks sign-in and permissions the same way
 // backend/core.py does (current_user, staff_user, owner_user, require), and turns errors into HTTP-style responses.
-import { db, state, fail, HttpError, requirePerm, mfaRequiredFor } from "./core";
+import { db, state, fail, HttpError, requirePerm, mfaRequiredFor, PORTAL_ROLES } from "./core";
 
 const routes = [];
 export function route(method, path, handler, opts = {}) {
@@ -26,8 +26,9 @@ export async function dispatch(method, path, query, body, files) {
     const o = r.opts;
     if (o.auth || o.perm) {
       ctx.user = currentUser(path);
-      if ((o.auth === "staff" || o.perm) && ctx.user.role === "owner") fail(403, "This area is for staff accounts");
+      if ((o.auth === "staff" || o.perm) && PORTAL_ROLES.includes(ctx.user.role)) fail(403, "This area is for staff accounts");
       if (o.auth === "owner" && (ctx.user.role !== "owner" || !ctx.user.owner_id)) fail(403, "This area is for property owners");
+      if (o.auth === "investor" && (ctx.user.role !== "investor" || !ctx.user.investor_id)) fail(403, "This area is for investors");
       if (o.perm) requirePerm(ctx.user, o.perm[0], o.perm[1], path);
     }
     return r.handler(ctx);

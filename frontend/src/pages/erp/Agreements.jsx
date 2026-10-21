@@ -85,7 +85,13 @@ function SourcePicker({ tpl, onPick }) {
   );
 }
 
+// A fresh editor for each agreement (going from one agreement to "new" must not keep the old one's state).
 export function AgreementEditor() {
+  const { id } = useParams();
+  return <Editor key={id || "new"} />;
+}
+
+function Editor() {
   const { id } = useParams();
   const isNew = !id || id === "new";
   const [sp] = useSearchParams();
