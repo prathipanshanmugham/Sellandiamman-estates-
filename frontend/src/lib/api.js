@@ -54,6 +54,9 @@ export function fmtDateTime(s) {
 export const todayIST = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
 export const nowIST = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 16);
 export const label = (s) => (s ? String(s).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "-");
+export const PAY_METHODS = { upi: "UPI", bank_transfer: "Bank transfer", cheque: "Cheque", cash: "Cash" };
+export const payMethod = (m) => PAY_METHODS[m] || label(m);
+export const METHOD_OPTS = Object.entries(PAY_METHODS).map(([value, l]) => ({ value, label: l }));
 export const opts = (arr) => arr.map((v) => (typeof v === "string" ? { value: v, label: label(v) } : v));
 export const uid = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 

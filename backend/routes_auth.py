@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request, Response, HTTPException, Depends
 from pydantic import BaseModel, Field
 from core import (db, now, now_iso, new_id, hash_password, verify_password, current_user, staff_user, require, audit,
                   public_user, client_ip, rate_limit, send_email, get_settings_cached, mfa_required_for,
-                  JWT_SECRET, JWT_ALG, SESSION_HOURS, ROLES, COOKIE_SECURE, SITE_URL)
+                  JWT_SECRET, JWT_ALG, SESSION_HOURS, ROLES, COOKIE_SECURE, SITE_URL, PORTAL_ROLES)
 
 router = APIRouter()
 EMAIL_RE = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -57,6 +57,7 @@ class UserIn(BaseModel):
     branch_ids: List[str] = []
     owner_id: Optional[str] = None
     investor_id: Optional[str] = None
+    customer_id: Optional[str] = None
     password: Optional[str] = Field(None, min_length=8, max_length=200)
     designation: Optional[str] = Field(None, max_length=80)
     department: Optional[str] = Field(None, max_length=60)
@@ -96,7 +97,7 @@ async def _check_manager(uid, reports_to):
             raise HTTPException(422, "That reporting line would make a loop")
         seen.add(cur)
         m = await db.users.find_one({"id": cur}, {"_id": 0, "reports_to": 1, "role": 1})
-        if not m or m["role"] in ("owner", "investor"):
+        if not m or m["role"] in PORTAL_ROLES:
             raise HTTPException(422, "Choose a staff member as the manager")
         cur = m.get("reports_to")
     return reports_to
@@ -269,12 +270,26 @@ async def mfa_disable(body: DisableMfaIn, user=Depends(current_user)):
 
 
 # ---------- Password reset & activation ----------
+PORTAL_LOGIN = {"owner": ("owner", "owner / lessor", "your properties, rent collected, monthly statements, bills and repair requests"),
+                "investor": ("investor", "investor", "your holdings, payouts, statements and project updates"),
+                "tenant": ("tenant", "tenant", "your rent, receipts, electricity and other bills, deposit, documents and service requests"),
+                "buyer": ("buyer", "buyer", "the progress of your purchase, site visits, documents and service requests")}
+
+
 async def _issue_token(user, purpose):
     token = secrets.token_urlsafe(32)
+    portal = PORTAL_LOGIN.get(user.get("role"))
+    hours = (24 * 7 if portal else 24) if purpose == "activation" else 1
     await db.password_reset_tokens.insert_one({"token": token, "user_id": user["id"], "purpose": purpose,
-                                               "used": False, "expires_at": now() + timedelta(hours=24 if purpose == "activation" else 1)})
+                                               "used": False, "expires_at": now() + timedelta(hours=hours)})
     link = f"{SITE_URL}/erp/reset-password?token={token}"
-    if purpose == "activation":
+    if purpose == "activation" and portal:
+        subject = f"Your Sellandiamman Estates {portal[1]} login"
+        text = (f"Hello {user.get('name') or ''},\n\nWe have opened a {portal[1]} login for you. In it you can see {portal[2]}, "
+                f"and raise requests with us at any time.\n\nSet your password within 7 days using this link:\n{link}\n\n"
+                f"After that, sign in at {SITE_URL}/login/{portal[0]} with this email address.\n\n"
+                "If you were not expecting this, ignore this email.")
+    elif purpose == "activation":
         subject = "Your Sellandiamman Estates account"
         text = (f"Hello {user.get('name') or ''},\n\nAn account has been created for you. Set your password within "
                 f"24 hours using this link:\n{link}\n\nIf you were not expecting this, ignore this email.")
@@ -308,7 +323,8 @@ async def reset(body: ResetIn, request: Request):
     await db.password_reset_tokens.update_one({"token": body.token}, {"$set": {"used": True}})
     await db.sessions.update_many({"user_id": t["user_id"]}, {"$set": {"revoked": True}})
     await audit({"id": t["user_id"], "name": "", "role": None}, "password_reset", "users", t["user_id"])
-    return {"ok": True}
+    u = await db.users.find_one({"id": t["user_id"]}, {"_id": 0, "role": 1})
+    return {"ok": True, "portal": u["role"] if u and u["role"] in PORTAL_ROLES else None}
 
 
 @router.post("/auth/change-password")
@@ -337,7 +353,7 @@ async def roles(user=Depends(staff_user)):
 
 @router.get("/users/lite")
 async def users_lite(user=Depends(staff_user)):
-    return await db.users.find({"active": True, "role": {"$nin": ["owner", "investor"]}},
+    return await db.users.find({"active": True, "role": {"$nin": list(PORTAL_ROLES)}},
                                {"_id": 0, "id": 1, "name": 1, "role": 1, "branch_ids": 1, "designation": 1}).to_list(500)
 
 
@@ -366,12 +382,17 @@ async def create_user(body: UserIn, user=Depends(require("users", "w"))):
     if body.role == "investor":
         if not body.investor_id or not await db.investors.find_one({"id": body.investor_id, "deleted": {"$ne": True}}):
             raise HTTPException(422, "Choose the investor record this portal account belongs to")
-    portal = body.role in ("owner", "investor")
+    if body.role in ("tenant", "buyer"):
+        if not body.customer_id or not await db.customers.find_one({"id": body.customer_id, "deleted": {"$ne": True},
+                                                                     "merged_into": None}):
+            raise HTTPException(422, "Choose the customer this login belongs to")
+    portal = body.role in PORTAL_ROLES
     uid = new_id()
     doc = {"id": uid, "email": email, "name": body.name.strip(), "role": body.role, "phone": body.phone,
            "branch_ids": [] if portal else await _check_branches(body.branch_ids), "active": bool(body.password),
            "created_at": now_iso(), "owner_id": body.owner_id if body.role == "owner" else None,
            "investor_id": body.investor_id if body.role == "investor" else None,
+           "customer_id": body.customer_id if body.role in ("tenant", "buyer") else None,
            "password_hash": hash_password(body.password) if body.password else None}
     if not portal:
         doc.update({"designation": body.designation, "department": body.department, "whatsapp": body.whatsapp,
@@ -392,7 +413,7 @@ async def update_user(uid: str, body: UserPatch, user=Depends(require("users", "
     upd = {k: v for k, v in upd.items() if v is not None or k in ("reports_to", "designation", "department", "whatsapp")}
     if "role" in upd:
         _check_grant(user, upd["role"])
-        portal = ("owner", "investor")
+        portal = PORTAL_ROLES
         if (upd["role"] in portal or target["role"] in portal) and upd["role"] != target["role"]:
             raise HTTPException(422, "Portal accounts and staff accounts cannot be converted into each other")
     if "branch_ids" in upd:

@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, HashRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
-import { AuthProvider, Protected, OwnerOnly, InvestorOnly, Gate } from "./lib/auth";
+import { AuthProvider, Protected, OwnerOnly, InvestorOnly, PortalOnly, Gate } from "./lib/auth";
 import { DialogProvider } from "./lib/dialogs";
 import { IS_DEMO } from "./lib/api";
 import SiteLayout from "./components/public/SiteLayout";
@@ -13,7 +13,7 @@ import PlacePage from "./pages/public/Places";
 import Shortlist from "./pages/public/Shortlist";
 import { Insights, Article } from "./pages/public/Insights";
 import { Services, ServiceDetail, About, Contact, Faq, Legal, Requirement, NotFound } from "./pages/public/Pages";
-import { Login, ResetPassword } from "./pages/erp/Login";
+import { Login, ResetPassword, CustomerLogin, LoginByType } from "./pages/erp/Login";
 
 // Staff and owner screens load on demand, so website visitors only download the public site.
 const named = (loader, name) => lazy(() => loader().then((m) => ({ default: m[name] })));
@@ -55,6 +55,9 @@ const Reports = named(erp, "Reports");
 const Users = named(erp, "Users");
 const Settings = named(erp, "Settings");
 const Audit = named(erp, "Audit");
+const Tickets = named(erp, "Tickets");
+const TicketDesk = named(erp, "TicketDesk");
+const Vault = named(erp, "Vault");
 const owner = () => import("./pages/owner/OwnerPortal");
 const OwnerLayout = named(owner, "OwnerLayout");
 const OwnerOverview = named(owner, "OwnerOverview");
@@ -63,6 +66,8 @@ const OwnerStatements = named(owner, "OwnerStatements");
 const OwnerRequests = named(owner, "OwnerRequests");
 const OwnerStays = named(owner, "OwnerStays");
 const OwnerDocuments = named(owner, "OwnerDocuments");
+const OwnerBills = named(owner, "OwnerBills");
+const OwnerRequest = named(owner, "OwnerRequest");
 const investor = () => import("./pages/investor/InvestorPortal");
 const InvestorLayout = named(investor, "InvestorLayout");
 const InvestorOverview = named(investor, "InvestorOverview");
@@ -70,6 +75,22 @@ const InvestorHolding = named(investor, "InvestorHolding");
 const InvestorPayouts = named(investor, "InvestorPayouts");
 const InvestorUpdates = named(investor, "InvestorUpdates");
 const InvestorDocuments = named(investor, "InvestorDocuments");
+const InvestorRequests = named(investor, "InvestorRequests");
+const InvestorRequest = named(investor, "InvestorRequest");
+const tenant = () => import("./pages/tenant/TenantPortal");
+const TenantLayout = named(tenant, "TenantLayout");
+const TenantOverview = named(tenant, "TenantOverview");
+const TenantRent = named(tenant, "TenantRent");
+const TenantBills = named(tenant, "TenantBills");
+const TenantRequests = named(tenant, "TenantRequests");
+const TenantRequest = named(tenant, "TenantRequest");
+const TenantDocuments = named(tenant, "TenantDocuments");
+const buyer = () => import("./pages/buyer/BuyerPortal");
+const BuyerLayout = named(buyer, "BuyerLayout");
+const BuyerOverview = named(buyer, "BuyerOverview");
+const BuyerRequests = named(buyer, "BuyerRequests");
+const BuyerRequest = named(buyer, "BuyerRequest");
+const BuyerDocuments = named(buyer, "BuyerDocuments");
 const Wait = () => <div className="flex min-h-[40vh] items-center justify-center p-10 text-sm text-slate-500">Loading…</div>;
 
 const g = (m, el) => <Gate module={m}>{el}</Gate>;
@@ -103,6 +124,8 @@ export default function App({ children }) {
               <Route path="*" element={<NotFound />} />
             </Route>
             <Route path="/erp/login" element={<Login />} />
+            <Route path="/login" element={<CustomerLogin />} />
+            <Route path="/login/:type" element={<LoginByType />} />
             <Route path="/erp/reset-password" element={<ResetPassword />} />
             <Route path="/erp/setup-2-step" element={<Protected><ForcedSetup /></Protected>} />
             <Route path="/erp" element={<Protected><ErpLayout /></Protected>}>
@@ -131,6 +154,9 @@ export default function App({ children }) {
               <Route path="finance" element={g("finance", <Finance />)} />
               <Route path="leases" element={g("leases", <Leases />)} />
               <Route path="maintenance" element={g("maintenance", <Maintenance />)} />
+              <Route path="tickets" element={g("maintenance", <Tickets />)} />
+              <Route path="tickets/:id" element={g("maintenance", <TicketDesk />)} />
+              <Route path="vault" element={g("vault", <Vault />)} />
               <Route path="short-stay" element={g("shortstay", <ShortStay />)} />
               <Route path="documents" element={g("documents", <Documents />)} />
               <Route path="insights" element={g("cms", <InsightsList />)} />
@@ -148,7 +174,9 @@ export default function App({ children }) {
               <Route index element={<OwnerOverview />} />
               <Route path="rent" element={<OwnerRent />} />
               <Route path="statements" element={<OwnerStatements />} />
+              <Route path="bills" element={<OwnerBills />} />
               <Route path="requests" element={<OwnerRequests />} />
+              <Route path="requests/:id" element={<OwnerRequest />} />
               <Route path="stays" element={<OwnerStays />} />
               <Route path="documents" element={<OwnerDocuments />} />
             </Route>
@@ -158,6 +186,22 @@ export default function App({ children }) {
               <Route path="payouts" element={<InvestorPayouts />} />
               <Route path="updates" element={<InvestorUpdates />} />
               <Route path="documents" element={<InvestorDocuments />} />
+              <Route path="requests" element={<InvestorRequests />} />
+              <Route path="requests/:id" element={<InvestorRequest />} />
+            </Route>
+            <Route path="/tenant" element={<PortalOnly role="tenant"><TenantLayout /></PortalOnly>}>
+              <Route index element={<TenantOverview />} />
+              <Route path="rent" element={<TenantRent />} />
+              <Route path="bills" element={<TenantBills />} />
+              <Route path="requests" element={<TenantRequests />} />
+              <Route path="requests/:id" element={<TenantRequest />} />
+              <Route path="documents" element={<TenantDocuments />} />
+            </Route>
+            <Route path="/buyer" element={<PortalOnly role="buyer"><BuyerLayout /></PortalOnly>}>
+              <Route index element={<BuyerOverview />} />
+              <Route path="requests" element={<BuyerRequests />} />
+              <Route path="requests/:id" element={<BuyerRequest />} />
+              <Route path="documents" element={<BuyerDocuments />} />
             </Route>
           </Routes>
           </Suspense>

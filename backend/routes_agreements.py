@@ -303,6 +303,11 @@ async def _store(a, data, ctype, name, doc_type, user, share_owner=False, share_
             await db.documents.insert_one({**d, "id": new_id(), "entity_type": et, "entity_id": eid,
                                            "share_with_owner": share_owner and et in ("property", "owner"),
                                            "share_with_investor": share_investor and et == "investor"})
+    # a rental or lease agreement also sits on the lease, where the tenant sees it in their portal when shared
+    if a.get("entity_type") == "lease" and a.get("entity_id"):
+        await db.documents.insert_one({**d, "id": new_id(), "entity_type": "lease", "entity_id": a["entity_id"],
+                                       "share_with_owner": False, "share_with_investor": False,
+                                       "share_with_tenant": bool(share_owner)})
     return d
 
 

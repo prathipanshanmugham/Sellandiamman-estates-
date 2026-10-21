@@ -99,11 +99,14 @@ def calc_shortstay(check_in: date, check_out: date, nightly_rate, discount=0, cl
             "owner_payout": owner, "adr": r2(room / nights)}
 
 
-def calc_owner_statement(rent_items, expense_items):
+def calc_owner_statement(rent_items, expense_items, charge_items=()):
+    """Rent less our fee (on rent only) less repairs, plus bills we collected from tenants for the owner (EB, water…)."""
     rent = r2(sum(float(i["amount"]) for i in rent_items))
     fee = r2(sum(float(i["amount"]) * float(i.get("fee_pct") or 0) / 100 for i in rent_items))
     exp = r2(sum(float(e["amount"]) for e in expense_items))
-    return {"rent_collected": rent, "management_fee": fee, "expenses": exp, "net_payable": r2(rent - fee - exp)}
+    chg = r2(sum(float(c["amount"]) for c in charge_items))
+    return {"rent_collected": rent, "management_fee": fee, "expenses": exp, "charges_collected": chg,
+            "net_payable": r2(rent - fee - exp + chg)}
 
 
 def can_transition(current, target):

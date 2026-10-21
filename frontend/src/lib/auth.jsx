@@ -48,42 +48,41 @@ export function AuthProvider({ children }) {
 }
 
 export const useAuth = () => useContext(AuthCtx);
-export const homeFor = (u) => (u?.role === "owner" ? "/owner" : u?.role === "investor" ? "/investor" : "/erp");
+// Customer sign-ins and where each one lands. Staff use /erp.
+export const PORTALS = { owner: "/owner", investor: "/investor", tenant: "/tenant", buyer: "/buyer" };
+export const isPortal = (u) => !!u && u.role in PORTALS;
+export const homeFor = (u) => PORTALS[u?.role] || "/erp";
 
 function Checking() {
   return <div className="flex min-h-screen items-center justify-center p-10 text-sm text-slate-500" data-testid="auth-loading">Checking your session…</div>;
 }
 
-// Staff area: signed-in staff only; owners go to their portal; roles that require 2-step sign-in set it up first.
+// Staff area: signed-in staff only; customers go to their portal; roles that require 2-step sign-in set it up first.
 export function Protected({ children }) {
   const { user, signedOut } = useAuth();
   const loc = useLocation();
   if (user === null) return <Checking />;
   // After an expired session, come back to the same page; after signing out on purpose, start from the dashboard.
   if (!user) return <Navigate to="/erp/login" replace state={signedOut ? undefined : { from: loc.pathname }} />;
-  if (user.role === "owner" || user.role === "investor") return <Navigate to={homeFor(user)} replace />;
+  if (isPortal(user)) return <Navigate to={homeFor(user)} replace />;
   if (user.mfa_setup_required && loc.pathname !== "/erp/setup-2-step") return <Navigate to="/erp/setup-2-step" replace />;
   return children;
 }
 
-export function OwnerOnly({ children }) {
+// A customer portal: only that kind of customer; others are sent to their own home. Signed-out visitors go to that
+// portal's sign-in page and come back to the page they asked for.
+export function PortalOnly({ role, children }) {
   const { user, signedOut } = useAuth();
   const loc = useLocation();
   if (user === null) return <Checking />;
-  if (!user) return <Navigate to="/erp/login" replace state={signedOut ? undefined : { from: loc.pathname }} />;
-  if (user.role !== "owner") return <Navigate to={homeFor(user)} replace />;
-  return children;
-}
-
-export function InvestorOnly({ children }) {
-  const { user, signedOut } = useAuth();
-  const loc = useLocation();
-  if (user === null) return <Checking />;
-  if (!user) return <Navigate to="/erp/login" replace state={signedOut ? undefined : { from: loc.pathname }} />;
-  if (user.role !== "investor") return <Navigate to={homeFor(user)} replace />;
+  if (!user) return <Navigate to={`/login/${role}`} replace state={signedOut ? undefined : { from: loc.pathname }} />;
+  if (user.role !== role) return <Navigate to={homeFor(user)} replace />;
   if (user.mfa_setup_required) return <Navigate to="/erp/setup-2-step" replace />;
   return children;
 }
+
+export const OwnerOnly = ({ children }) => <PortalOnly role="owner">{children}</PortalOnly>;
+export const InvestorOnly = ({ children }) => <PortalOnly role="investor">{children}</PortalOnly>;
 
 export function Gate({ module, action = "r", children }) {
   const { can } = useAuth();

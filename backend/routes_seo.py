@@ -31,7 +31,7 @@ PER = {"rent": " a month", "lease": " a month", "short_stay": " a night"}
 CAT = {"residential": "house", "apartment": "apartment", "villa": "villa", "land": "plot", "agricultural": "agricultural land",
        "commercial": "commercial property", "shop": "shop", "office": "office space", "industrial": "industrial plot",
        "warehouse": "warehouse", "factory_shed": "factory shed", "other": "property"}
-PRIVATE = ("/erp", "/owner", "/investor", "/shortlist")
+PRIVATE = ("/erp", "/owner", "/investor", "/tenant", "/buyer", "/login", "/shortlist")
 AI_BOTS = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-User", "Claude-SearchBot", "anthropic-ai",
            "PerplexityBot", "Perplexity-User", "Google-Extended", "Applebot-Extended", "Bingbot", "CCBot", "meta-externalagent"]
 
@@ -446,7 +446,7 @@ async def sitemap(request: Request):
 @router.api_route("/robots.txt", methods=["GET", "HEAD"])
 async def robots(request: Request):
     base = base_url(request)
-    rules = "Allow: /\nAllow: /s/\nAllow: /api/public/media/\nDisallow: /erp\nDisallow: /owner\nDisallow: /investor\nDisallow: /shortlist\nDisallow: /api/\n"
+    rules = "Allow: /\nAllow: /s/\nAllow: /api/public/media/\nDisallow: /erp\nDisallow: /owner\nDisallow: /investor\nDisallow: /tenant\nDisallow: /buyer\nDisallow: /login\nDisallow: /shortlist\nDisallow: /api/\n"
     txt = "# Search engines and AI assistants are welcome to read the public pages. Private areas are closed.\n"
     txt += f"# A plain-text summary for AI assistants: {base}/llms.txt\n\nUser-agent: *\n{rules}\n"
     for bot in AI_BOTS:

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Menu, X, Phone, Mail, MapPin, MessageCircle, Heart, Facebook, Instagram, Youtube, Linkedin, Globe, Eye } from "lucide-react";
+import { Menu, X, Phone, Mail, MapPin, MessageCircle, Heart, Facebook, Instagram, Youtube, Linkedin, Globe, Eye, UserRound } from "lucide-react";
 import { api, store, waLink, useShortlist, telLink, cachedGet, placeUrl } from "../../lib/api";
 import { DEFAULT_SITE } from "../../lib/content";
 import { Logo } from "../brand/Logo";
@@ -11,9 +11,9 @@ export const useSite = () => useContext(SiteCtx);
 const NAV = [["/properties", "Properties"], ["/services", "Services"], ["/insights", "Insights"], ["/list-property", "List your property"], ["/contact", "Contact"]];
 
 // Kept for older imports: the brand lockup, or an uploaded logo when an administrator has set one.
-export function Wordmark({ dark = false, logo, size = "md" }) {
+export function Wordmark({ dark = false, logo, size = "md", stacked = false }) {
   if (logo) return <img src={logo} alt="Sellandiamman Estates" className="h-10 w-auto" />;
-  return <Logo tone={dark ? "dark" : "light"} size={size} />;
+  return <Logo tone={dark ? "dark" : "light"} size={size} stacked={stacked} />;
 }
 
 function Header({ site }) {
@@ -35,7 +35,7 @@ function Header({ site }) {
             <Heart size={19} />
             {saved.length > 0 && <span className="absolute right-0.5 top-0.5 min-w-[16px] bg-slate-900 px-1 text-center text-[10px] font-semibold leading-4 text-white">{saved.length}</span>}
           </Link>
-          <Link to="/erp/login" className="btn-line btn-sm hidden lg:inline-flex" data-testid="nav-staff-login">Sign in</Link>
+          <Link to="/login" className="btn-line btn-sm hidden lg:inline-flex" data-testid="nav-customer-login"><UserRound size={15} />Customer login</Link>
           <button className="p-2 lg:hidden" onClick={() => setOpen(!open)} aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} data-testid="mobile-menu-toggle">{open ? <X /> : <Menu />}</button>
         </div>
       </div>
@@ -43,7 +43,7 @@ function Header({ site }) {
         <nav className="border-t border-slate-200 bg-white lg:hidden" data-testid="mobile-menu" aria-label="Main">
           {NAV.map(([to, l]) => <Link key={to} to={to} className="block border-b border-slate-100 px-5 py-3.5 text-sm">{l}</Link>)}
           <Link to="/shortlist" className="block border-b border-slate-100 px-5 py-3.5 text-sm">Saved properties ({saved.length})</Link>
-          <Link to="/erp/login" className="block px-5 py-3.5 text-sm font-semibold">Staff & owner sign in</Link>
+          <Link to="/login" className="flex items-center gap-2 px-5 py-3.5 text-sm font-semibold" data-testid="mobile-customer-login"><UserRound size={16} />Customer login · tenant, owner, buyer, investor</Link>
         </nav>
       )}
     </header>
@@ -58,7 +58,7 @@ function Footer({ site }) {
     <footer className="relative overflow-hidden bg-slate-900 text-slate-300">
       <div className="container-x grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <Wordmark dark />
+          <Wordmark dark stacked />
           <p className="mt-5 text-sm text-slate-400">{site.content.footer_tagline}</p>
           {site.rera_no && <p className="mt-3 text-xs text-slate-500" data-testid="footer-rera">TNRERA agent registration: {site.rera_no}</p>}
           {social.length > 0 && <div className="mt-5 flex gap-2">{social.map(([k, url]) => { const I = SOCIAL[k] || Globe; return <a key={k} href={url} target="_blank" rel="noopener noreferrer" aria-label={k.replace("_", " ")} className="border border-slate-700 p-2 text-slate-400 hover:border-slate-500 hover:text-white"><I size={16} /></a>; })}</div>}
@@ -87,7 +87,9 @@ function Footer({ site }) {
       <div className="border-t border-slate-800">
         <div className="container-x flex flex-col justify-between gap-2 py-5 text-xs text-slate-500 sm:flex-row">
           <span>© {new Date().getFullYear()} Sellandiamman Estates. All rights reserved.</span>
-          <span>Listings are subject to verification and availability. <Link to="/legal/disclaimer" className="underline">Disclaimer</Link></span>
+          <span className="flex flex-wrap gap-x-4 gap-y-1"><span>Listings are subject to verification and availability. <Link to="/legal/disclaimer" className="underline">Disclaimer</Link></span>
+            <Link to="/login" className="underline hover:text-slate-300" data-testid="footer-customer-login">Customer login</Link>
+            <Link to="/erp/login" className="underline hover:text-slate-300" data-testid="footer-staff-login">Staff sign in</Link></span>
         </div>
       </div>
     </footer>

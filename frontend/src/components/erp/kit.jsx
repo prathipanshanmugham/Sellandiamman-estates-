@@ -13,9 +13,9 @@ export function PageHeader({ title, sub, children }) {
 }
 
 const TONES = { green: "bg-emerald-50 text-emerald-800 border-emerald-200", amber: "bg-amber-50 text-amber-800 border-amber-200", blue: "bg-blue-50 text-blue-800 border-blue-200", red: "bg-red-50 text-red-800 border-red-200", grey: "bg-slate-50 text-slate-700 border-slate-200" };
-const STATUS_TONE = { published: "green", verified: "green", won: "green", paid: "green", active: "green", completed: "green", closed: "grey", done: "green", approved: "green", settled: "green", verification_pending: "amber", pending: "amber", partially_paid: "amber", negotiation: "blue", agreement: "blue", issued: "blue", confirmed: "blue", in_progress: "blue", checked_in: "blue", lost: "red", cancelled: "red", rejected: "red", disputed: "red", void: "red", urgent: "red", high: "amber", overdue: "red", failed: "red", requested: "amber", scheduled: "blue", no_show: "red", ready_to_market: "blue", under_offer: "blue", pending_manual_transfer: "amber", due: "amber", visit: "blue", stay: "green", rent: "amber", lease_end: "red", task: "grey", authorisation: "amber", conflict: "red", declined: "grey", draft: "grey", final: "green", open: "blue", funded: "blue", operating: "green", exiting: "amber", exited: "grey", healthy: "green", attention: "amber", critical: "red", needs_details: "amber", verified_kyc: "green", block: "grey" };
-export function Badge({ v, tone, testid }) {
-  return <span className={`inline-block whitespace-nowrap border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${TONES[tone || STATUS_TONE[v] || "grey"]}`} data-testid={testid}>{label(v)}</span>;
+const STATUS_TONE = { published: "green", verified: "green", won: "green", paid: "green", active: "green", completed: "green", closed: "grey", done: "green", approved: "green", settled: "green", verification_pending: "amber", pending: "amber", partially_paid: "amber", negotiation: "blue", agreement: "blue", issued: "blue", confirmed: "blue", in_progress: "blue", checked_in: "blue", lost: "red", cancelled: "red", rejected: "red", disputed: "red", void: "red", urgent: "red", high: "amber", overdue: "red", failed: "red", requested: "amber", scheduled: "blue", no_show: "red", ready_to_market: "blue", under_offer: "blue", pending_manual_transfer: "amber", due: "amber", visit: "blue", stay: "green", rent: "amber", lease_end: "red", task: "grey", authorisation: "amber", conflict: "red", declined: "grey", draft: "grey", final: "green", open: "blue", funded: "blue", operating: "green", exiting: "amber", exited: "grey", healthy: "green", attention: "amber", critical: "red", needs_details: "amber", verified_kyc: "green", block: "grey", acknowledged: "blue", on_hold: "amber", resolved: "green", partly_paid: "amber", waived: "grey", invited: "amber" };
+export function Badge({ v, tone, testid, text }) {
+  return <span className={`inline-block whitespace-nowrap border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${TONES[tone || STATUS_TONE[v] || "grey"]}`} data-testid={testid}>{text || label(v)}</span>;
 }
 
 export function Kpi({ title, value, hint, testid, onClick }) {
@@ -112,6 +112,6 @@ export function Section({ title, children, actions, testid }) {
   return <section className="panel p-5" data-testid={testid}><div className="mb-4 flex items-center justify-between gap-2"><h2 className="font-heading text-base font-semibold">{title}</h2><div className="flex gap-2">{actions}</div></div>{children}</section>;
 }
 
-export function Facts({ items }) {
-  return <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">{items.filter(Boolean).map(([k, v]) => <div key={k}><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt><dd className="mt-0.5 break-words text-sm text-slate-800">{v ?? "-"}</dd></div>)}</dl>;
+export function Facts({ items, cols = "grid-cols-2 sm:grid-cols-3" }) {
+  return <dl className={`grid gap-x-6 gap-y-3 ${cols}`}>{items.filter(Boolean).map(([k, v]) => <div key={k}><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt><dd className="mt-0.5 break-words text-sm text-slate-800">{v ?? "-"}</dd></div>)}</dl>;
 }

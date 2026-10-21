@@ -1,37 +1,24 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
-import { LogOut, Phone, MessageCircle, Mail, FileText } from "lucide-react";
-import { api, fmtDate, fmtDateTime, inr, label, openFile, useMeta, imgSrc, todayIST, telLink, waLink } from "../../lib/api";
-import { useAuth } from "../../lib/auth";
-import { Logo } from "../../components/brand/Logo";
+import { Link, useParams } from "react-router-dom";
+import { Phone, MessageCircle, Mail, FileText } from "lucide-react";
+import { api, fmtDate, fmtDateTime, inr, label, openFile, imgSrc, todayIST, telLink, waLink } from "../../lib/api";
+import { PortalShell } from "../../components/portal/PortalShell";
+import { RequestsList, RequestDetail } from "../../components/portal/Requests";
 import { Markdown } from "../../lib/markdown";
 import { Badge, DataTable, Kpi, Section, Facts, act } from "../../components/erp/kit";
 import { ValueChart } from "../../components/ValueChart";
 
-const TABS = [["/investor", "Overview"], ["/investor/payouts", "Payouts"], ["/investor/updates", "Updates"], ["/investor/documents", "Documents & statements"]];
+const TABS = [["/investor", "Overview"], ["/investor/payouts", "Payouts"], ["/investor/updates", "Updates"], ["/investor/documents", "Documents & statements"], ["/investor/requests", "Requests"]];
 const pct = (v) => (v == null ? "-" : `${Number(v).toFixed(1)}%`);
 const fyStart = () => { const t = todayIST(); const y = Number(t.slice(0, 4)) - (t.slice(5, 7) < "04" ? 1 : 0); return `${y}-04-01`; };
 
 export function InvestorLayout() {
-  const { user, logout } = useAuth();
-  const nav = useNavigate();
-  useMeta({ title: "Investor dashboard", noindex: true });
-  return (
-    <div className="min-h-screen bg-slate-50" data-testid="investor-portal">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link to="/investor" aria-label="Investor dashboard home"><Logo size="sm" /></Link>
-          <div className="flex items-center gap-3 text-sm"><span className="hidden text-slate-600 sm:inline" data-testid="investor-name">{user.name}</span><button className="flex items-center gap-1 text-slate-600 hover:text-slate-900" onClick={async () => { await logout(); nav("/erp/login"); }} data-testid="investor-logout"><LogOut size={16} />Sign out</button></div>
-        </div>
-        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-2 sm:px-4" aria-label="Investor dashboard">
-          {TABS.map(([to, l]) => <NavLink key={to} to={to} end className={({ isActive }) => `shrink-0 border-b-2 px-3 py-2.5 text-sm ${isActive ? "border-slate-900 font-semibold text-slate-900" : "border-transparent text-slate-600 hover:text-slate-900"}`} data-testid={`investor-tab-${l.split(" ")[0].toLowerCase()}`}>{l}</NavLink>)}
-        </nav>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8"><Outlet /></main>
-      <footer className="mx-auto max-w-6xl px-4 pb-10 text-xs text-slate-500 sm:px-6">Values between valuations are estimates based on the last valuation and are not a guaranteed sale price. Investments in property carry risk and are not deposits. Past returns do not promise future returns. Questions? Contact your relationship manager.</footer>
-    </div>
-  );
+  return <PortalShell kind="investor" home="/investor" title="Investor dashboard" tabs={TABS}
+    footer="Values between valuations are estimates based on the last valuation and are not a guaranteed sale price. Investments in property carry risk and are not deposits. Past returns do not promise future returns. Questions? Raise a request or contact your relationship manager." />;
 }
+
+export const InvestorRequests = () => <RequestsList base="/investor/requests" allowEntry={false} intro="Questions about a payout or statement, a document you need, or anything else about your investment." />;
+export const InvestorRequest = () => <RequestDetail base="/investor/requests" />;
 
 function Rm({ rm }) {
   if (!rm) return null;

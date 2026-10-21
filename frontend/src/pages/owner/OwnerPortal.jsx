@@ -1,33 +1,16 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LogOut } from "lucide-react";
-import { api, fmtDate, inr, label, opts, openFile, useMeta, priceLabel, imgSrc } from "../../lib/api";
-import { useAuth } from "../../lib/auth";
-import { Logo } from "../../components/brand/Logo";
-import { Badge, DataTable, Kpi, Section, FormDialog, useList, act, Facts } from "../../components/erp/kit";
+import { Link } from "react-router-dom";
+import { api, fmtDate, inr, label, openFile, priceLabel, imgSrc } from "../../lib/api";
+import { Badge, DataTable, Kpi, Section, useList, act, Facts } from "../../components/erp/kit";
+import { PortalShell } from "../../components/portal/PortalShell";
+import { RequestsList, RequestDetail } from "../../components/portal/Requests";
 
-const TABS = [["/owner", "Overview"], ["/owner/rent", "Rent & tenants"], ["/owner/statements", "Statements"], ["/owner/requests", "Maintenance"], ["/owner/stays", "Short stays"], ["/owner/documents", "Documents"]];
+const TABS = [["/owner", "Overview"], ["/owner/rent", "Rent & tenants"], ["/owner/bills", "Bills"], ["/owner/statements", "Statements"], ["/owner/requests", "Requests & repairs"], ["/owner/stays", "Short stays"], ["/owner/documents", "Documents"]];
 const monthLabel = (m) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
 
 export function OwnerLayout() {
-  const { user, logout } = useAuth();
-  const nav = useNavigate();
-  useMeta({ title: "Owner portal", noindex: true });
-  return (
-    <div className="min-h-screen bg-slate-50" data-testid="owner-portal">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link to="/owner" aria-label="Owner portal home"><Logo size="sm" /></Link>
-          <div className="flex items-center gap-3 text-sm"><span className="hidden text-slate-600 sm:inline" data-testid="owner-name">{user.name}</span><button className="flex items-center gap-1 text-slate-600 hover:text-slate-900" onClick={async () => { await logout(); nav("/erp/login"); }} data-testid="owner-logout"><LogOut size={16} />Sign out</button></div>
-        </div>
-        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-2 sm:px-4" aria-label="Owner portal">
-          {TABS.map(([to, l]) => <NavLink key={to} to={to} end className={({ isActive }) => `shrink-0 border-b-2 px-3 py-2.5 text-sm ${isActive ? "border-slate-900 font-semibold text-slate-900" : "border-transparent text-slate-600 hover:text-slate-900"}`} data-testid={`owner-tab-${l.split(" ")[0].toLowerCase()}`}>{l}</NavLink>)}
-        </nav>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8"><Outlet /></main>
-      <footer className="mx-auto max-w-6xl px-4 pb-10 text-xs text-slate-500 sm:px-6">Rent and deposits are held for you in a separate owner-funds account and are never counted as our income. Questions? Call your property manager or write to us from the <Link to="/contact" className="underline">contact page</Link>.</footer>
-    </div>
-  );
+  return <PortalShell kind="owner" home="/owner" title="Owner portal" tabs={TABS}
+    footer={<>Rent and deposits are held for you in a separate owner-funds account and are never counted as our income. Questions? <Link to="/owner/requests" className="underline">Raise a request</Link> or call your property manager.</>} />;
 }
 
 export function OwnerOverview() {
@@ -43,7 +26,7 @@ export function OwnerOverview() {
         <Kpi title={`Rent collected · ${monthLabel(d.month)}`} value={inr(m.rent_collected, true)} testid="owner-kpi-rent" />
         <Kpi title="Payable to you this month" value={inr(m.net_payable, true)} hint={`after ${inr(m.management_fee, true)} fee and ${inr(m.expenses, true)} repairs`} testid="owner-kpi-net" />
         <Kpi title="Rent overdue" value={inr(d.arrears, true)} hint={d.arrears > 0 ? "We are following up" : "All tenants up to date"} testid="owner-kpi-arrears" />
-        <Kpi title="Open maintenance" value={d.open_requests} hint={`${d.upcoming_stays} upcoming stays`} testid="owner-kpi-requests" />
+        <Kpi title="Open requests" value={d.open_tickets ?? d.open_requests} hint={`${d.bills_open || 0} tenant bills open · ${d.upcoming_stays} upcoming stays`} testid="owner-kpi-requests" />
       </div>
       {d.last_statement && <Section title="Latest statement"><div className="flex flex-wrap items-center justify-between gap-3 text-sm"><span>{monthLabel(d.last_statement.month)} · net {inr(d.last_statement.net_payable)} · <Badge v={d.last_statement.payout_status} /> {d.last_statement.payout_reference && <span className="text-xs text-slate-500">ref {d.last_statement.payout_reference}</span>}</span><button className="btn-line btn-sm" onClick={() => openFile(`/portal/statements/${d.last_statement.month}/pdf`, { name: `Statement ${d.last_statement.month}` })} data-testid="owner-latest-pdf">Statement PDF</button></div></Section>}
       <Section title={`Your properties (${d.properties.length})`}>
@@ -83,8 +66,8 @@ export function OwnerStatements() {
       {!d.months_with_rent.length ? <p className="panel p-6 text-sm text-slate-500">No rent collected yet, so there are no statements.</p> : <>
         <div className="flex flex-wrap items-end gap-2"><div><label className="lbl" htmlFor="st-month">Month</label><select id="st-month" className="inp" value={month} onChange={(e) => setMonth(e.target.value)} data-testid="owner-statement-month">{d.months_with_rent.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select></div><button className="btn-line btn-sm" onClick={() => openFile(`/portal/statements/${month}/pdf`, { name: `Statement ${month}` })} data-testid="owner-statement-pdf">Download PDF</button></div>
         {s && <Section title={monthLabel(month)} testid="owner-statement">
-          <DataTable rows={[...s.rents.map((r) => ({ ...r, desc: `Rent ${monthLabel(r.period)} (${r.lease_code})` })), ...(s.expense_items || []).map((e) => ({ desc: e.description, amount: -e.amount }))]} columns={[{ key: "date", label: "Date", render: (r) => fmtDate(r.date) }, { key: "desc", label: "Description" }, { key: "amount", label: "Amount", render: (r) => inr(r.amount) }]} />
-          <div className="mt-4 max-w-md space-y-1 text-sm">{[["Rent collected", s.rent_collected], ["Our management fee", -s.management_fee], ["Repairs and maintenance", -s.expenses]].map(([k, v]) => <p key={k} className="flex justify-between"><span className="text-slate-600">{k}</span><span className="tabular">{inr(v)}</span></p>)}<p className="flex justify-between border-t border-slate-900 pt-1 font-semibold"><span>Payable to you</span><span className="tabular" data-testid="owner-statement-net">{inr(s.net_payable)}</span></p></div>
+          <DataTable rows={[...s.rents.map((r) => ({ ...r, desc: `Rent ${monthLabel(r.period)} (${r.lease_code})` })), ...(s.charge_items || []).map((c) => ({ date: c.date, desc: `Collected for you: ${c.description}`, amount: c.amount })), ...(s.expense_items || []).map((e) => ({ desc: e.description, amount: -e.amount }))]} columns={[{ key: "date", label: "Date", render: (r) => fmtDate(r.date) }, { key: "desc", label: "Description" }, { key: "amount", label: "Amount", render: (r) => inr(r.amount) }]} />
+          <div className="mt-4 max-w-md space-y-1 text-sm">{[["Rent collected", s.rent_collected], ["Our management fee", -s.management_fee], ["Repairs and maintenance", -s.expenses], ...(s.charges_collected ? [["Bills collected for you (EB, water…)", s.charges_collected]] : [])].map(([k, v]) => <p key={k} className="flex justify-between"><span className="text-slate-600">{k}</span><span className="tabular">{inr(v)}</span></p>)}<p className="flex justify-between border-t border-slate-900 pt-1 font-semibold"><span>Payable to you</span><span className="tabular" data-testid="owner-statement-net">{inr(s.net_payable)}</span></p></div>
           <p className="mt-3 text-sm">{s.settled ? <>Settled · <Badge v={s.settled.payout_status} />{s.settled.payout_reference && <span className="ml-2 text-xs text-slate-500">bank ref {s.settled.payout_reference}</span>}</> : <span className="text-slate-500">Not settled yet. We settle each month after rent is collected.</span>}</p>
         </Section>}
       </>}
@@ -92,16 +75,25 @@ export function OwnerStatements() {
   );
 }
 
+// Requests (tickets) the owner raised, repairs their tenants reported, and the work orders with their cost.
 export function OwnerRequests() {
-  const { rows, reload, loading } = useList("/portal/work-orders");
-  const [props, setProps] = useState([]);
-  const [open, setOpen] = useState(false);
-  useEffect(() => { api.get("/portal/overview").then((r) => setProps(r.data.properties)).catch(() => {}); }, []);
+  const { rows, loading } = useList("/portal/work-orders");
+  return <RequestsList base="/owner/requests" intro="Ask us for anything about your property: repairs, a tenant search, a rent revision, EB or tax name transfers, documents. Repairs your tenants report show here too."
+    extra={<Section title="Repair work and costs" testid="owner-work-orders"><DataTable testid="owner-requests-table" loading={loading} rows={rows} columns={[{ key: "code", label: "Ref" }, { key: "title", label: "Work" }, { key: "property_title", label: "Property" }, { key: "status", label: "Status", render: (r) => <Badge v={r.status} /> }, { key: "actual_cost", label: "Cost", render: (r) => (r.actual_cost != null ? `${inr(r.actual_cost)}${r.charge_to === "owner" ? " (from your statement)" : ""}` : r.quote_amount != null ? `Quote ${inr(r.quote_amount)}` : "-") }]} empty="No repair work yet." /></Section>} />;
+}
+
+export const OwnerRequest = () => <RequestDetail base="/owner/requests" />;
+
+const BILL_STATUS = { due: "Due", partly_paid: "Part paid", paid: "Paid", waived: "Waived" };
+
+export function OwnerBills() {
+  const { rows, loading } = useList("/portal/bills");
+  const open = rows.filter((b) => ["due", "partly_paid"].includes(b.status));
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3"><h1 className="font-heading text-2xl font-semibold">Maintenance</h1><button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="owner-new-request">Report an issue</button></div>
-      <DataTable testid="owner-requests-table" loading={loading} rows={rows} columns={[{ key: "code", label: "Ref" }, { key: "title", label: "Issue" }, { key: "property_title", label: "Property" }, { key: "priority", label: "Priority", render: (r) => <Badge v={r.priority} /> }, { key: "status", label: "Status", render: (r) => <Badge v={r.status} /> }, { key: "actual_cost", label: "Cost", render: (r) => (r.actual_cost != null ? `${inr(r.actual_cost)}${r.charge_to === "owner" ? " (from your statement)" : ""}` : r.quote_amount != null ? `Quote ${inr(r.quote_amount)}` : "-") }]} empty="No maintenance requests." />
-      <FormDialog open={open} onClose={() => setOpen(false)} title="Report an issue" submitLabel="Send to property manager" initial={{ priority: "medium", property_id: props[0]?.id }} fields={[{ name: "property_id", label: "Property", type: "select", required: true, full: true, options: props.map((p) => ({ value: p.id, label: `${p.title} (${p.code})` })) }, { name: "title", label: "What needs fixing?", required: true, full: true }, { name: "priority", label: "How urgent?", type: "select", required: true, options: opts(["low", "medium", "high", "urgent"]) }, { name: "description", label: "Details", type: "textarea", full: true }]} onSubmit={async (v) => { await api.post("/portal/requests", v); reload(); }} />
+      <div><h1 className="font-heading text-2xl font-semibold">Tenant bills</h1><p className="mt-1 max-w-2xl text-sm text-slate-600">Electricity (EB), water, maintenance and other bills on your properties. Bills we collect are paid to you in full with your monthly statement; bills the tenant pays directly to the provider are listed so you can see they are paid.</p></div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3"><Kpi title="Open bills" value={open.length} hint={inr(open.reduce((s, b) => s + b.balance, 0), true)} testid="owner-bills-open" /><Kpi title="Overdue" value={open.filter((b) => b.overdue).length} /></div>
+      <DataTable testid="owner-bills-table" loading={loading} rows={rows} empty="No bills yet." columns={[{ key: "label", label: "Bill", render: (b) => <>{b.label}<span className="block text-xs text-slate-500">{b.code}{b.units != null ? ` · ${b.units} units` : ""}</span></> }, { key: "property_title", label: "Property", render: (b) => <>{b.property_title}<span className="block text-xs text-slate-500">{b.tenant_name}</span></> }, { key: "amount", label: "Amount", render: (b) => inr(b.amount) }, { key: "due_date", label: "Due", render: (b) => fmtDate(b.due_date) }, { key: "mode", label: "Paid to", render: (b) => (b.mode === "collect" ? (b.payee === "owner" ? "Us, passed to you" : "Us (our service)") : "Provider directly") }, { key: "status", label: "Status", render: (b) => <Badge v={b.overdue ? "overdue" : b.status} text={b.overdue ? "Overdue" : BILL_STATUS[b.status]} /> }]} />
     </div>
   );
 }

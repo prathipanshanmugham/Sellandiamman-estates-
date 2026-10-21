@@ -6,13 +6,14 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
-from brand import MARK_W, MARK_H, MARK_GREY, mark_polygons
+from brand import MARK_W, MARK_H, MARK_GREY, MARK_RED, COLORS, LOCKUP, S_POLYS, A_POLYS, WORD_POLYS, SUB_POLYS, mark_polygons
 
 INK = colors.HexColor("#0F172A")
 MUTED = colors.HexColor("#64748B")
 RULE = colors.HexColor("#CBD5E1")
 HEAD = colors.HexColor("#1E293B")
 GREY = colors.HexColor(MARK_GREY)
+RED = colors.HexColor(MARK_RED)
 PAGE_W, PAGE_H = A4
 MARGIN = 18 * mm
 HEADER_H = 30 * mm
@@ -45,20 +46,41 @@ def inr_short(v):
     return inr(v).replace("Rs. ", "₹").removesuffix(".00")
 
 
-def draw_mark(c, x, y, height, color=GREY):
-    """Draws the SA mark with its bottom-left corner at (x, y) in PDF points."""
-    s = height / MARK_H
-    c.saveState()
+def _fill(c, polys, color, x, y, s, ox=0.0, oy=0.0, k=1.0, h=MARK_H):
+    """Fills polygons given in brand units (y down) with the even-odd rule. (x, y) is the bottom-left of a box of height h."""
     c.setFillColor(color)
     p = c.beginPath()
-    for poly in mark_polygons():
+    for poly in polys:
         (x0, y0), rest = poly[0], poly[1:]
-        p.moveTo(x + x0 * s, y + (MARK_H - y0) * s)
+        p.moveTo(x + (ox + x0 * k) * s, y + (h - (oy + y0 * k)) * s)
         for px, py in rest:
-            p.lineTo(x + px * s, y + (MARK_H - py) * s)
+            p.lineTo(x + (ox + px * k) * s, y + (h - (oy + py * k)) * s)
         p.close()
-    c.drawPath(p, stroke=0, fill=1)
+    c.drawPath(p, stroke=0, fill=1, fillMode=0)  # 0 = even-odd
+
+
+def draw_mark(c, x, y, height, color=None, tone="light"):
+    """Draws the SA mark (grey S, red A) with its bottom-left corner at (x, y) in PDF points. color= makes it one colour."""
+    s = height / MARK_H
+    t = COLORS[tone]
+    c.saveState()
+    _fill(c, S_POLYS, color or colors.HexColor(t["s"]), x, y, s)
+    _fill(c, A_POLYS, color or colors.HexColor(t["a"]), x, y, s)
     c.restoreState()
+
+
+def draw_logo(c, x, y, height, tone="light"):
+    """Horizontal lockup (mark, SELLANDIAMMAN, ESTATES) with its bottom-left corner at (x, y); returns its width."""
+    s = height / LOCKUP["h"]
+    t = COLORS[tone]
+    c.saveState()
+    _fill(c, S_POLYS, colors.HexColor(t["s"]), x, y, s, h=LOCKUP["h"])
+    _fill(c, A_POLYS, colors.HexColor(t["a"]), x, y, s, h=LOCKUP["h"])
+    tx, ty, tk = LOCKUP["text_x"], LOCKUP["text_y"], LOCKUP["text_k"]
+    _fill(c, WORD_POLYS, colors.HexColor(t["word"]), x, y, s, tx, ty, tk, LOCKUP["h"])
+    _fill(c, SUB_POLYS, colors.HexColor(t["sub"]), x, y, s, tx, ty, tk, LOCKUP["h"])
+    c.restoreState()
+    return LOCKUP["w"] * s
 
 
 def _letterspaced(c, text, x, y, font, size, spacing):
@@ -73,14 +95,8 @@ def _page(company, title):
     def draw(c, doc):
         c.saveState()
         top = PAGE_H - 12 * mm
-        mh = 11 * mm
-        draw_mark(c, MARGIN, top - mh, mh)
-        tx = MARGIN + mh * MARK_W / MARK_H + 4 * mm
-        c.setFillColor(INK)
-        c.setFont("Helvetica-Bold", 13)
-        c.drawString(tx, top - 5.2 * mm, "SELLANDIAMMAN")
+        room = PAGE_W - 2 * MARGIN - draw_logo(c, MARGIN, top - 10.5 * mm, 10.5 * mm) - 6 * mm
         c.setFillColor(MUTED)
-        _letterspaced(c, "ESTATES", tx + 0.3, top - 9.4 * mm, "Helvetica", 7.2, 3.1)
         c.setFont("Helvetica", 7.5)
         lines = [company.get("legal_name") or company.get("name") or "Sellandiamman Estates",
                  company.get("address") or "",
@@ -90,7 +106,9 @@ def _page(company, title):
         if company.get("rera_no"):
             lines.append(f"TNRERA Agent Reg. {company['rera_no']}")
         for i, ln in enumerate([ln for ln in lines if ln][:5]):
-            c.drawRightString(PAGE_W - MARGIN, top - 2.6 * mm - i * 3.4 * mm, ln[:95])
+            while len(ln) > 8 and c.stringWidth(ln, "Helvetica", 7.5) > room:
+                ln = ln[:-2].rstrip(" ,·") + "…"
+            c.drawRightString(PAGE_W - MARGIN, top - 2.4 * mm - i * 3.0 * mm, ln)
         c.setStrokeColor(RULE)
         c.setLineWidth(0.6)
         c.line(MARGIN, PAGE_H - HEADER_H + 2 * mm, PAGE_W - MARGIN, PAGE_H - HEADER_H + 2 * mm)

@@ -1,6 +1,7 @@
 import csv
 import io
 import base64
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 import jwt
@@ -216,7 +217,7 @@ async def report_csv(name: str, frm: Optional[str] = None, to: Optional[str] = N
 ENTITY_MODULE = {"property": "properties", "lead": "leads", "deal": "deals", "lease": "leases", "owner": "owners",
                  "booking": "shortstay", "work_order": "maintenance", "vendor": "maintenance", "company": "settings",
                  "post": "cms", "customer": "customers", "investor": "investors", "inv_project": "investors",
-                 "agreement": "agreements"}
+                 "agreement": "agreements", "ticket": "maintenance"}
 ENTITY_COLL = {"property": "properties", "lead": "leads", "deal": "deals", "customer": "customers", "agreement": "agreements"}
 
 
@@ -334,6 +335,15 @@ async def share_doc(did: str, body: dict, user=Depends(require("documents", "w")
         await db.documents.update_one({"id": did}, {"$set": {"share_with_investor": share}})
         await audit(user, "document_shared_investor" if share else "document_unshared_investor", "documents", did)
         return {"ok": True, "share_with_investor": share}
+    if body.get("with") in ("tenant", "buyer"):
+        ok = {"tenant": ("lease", "customer"), "buyer": ("deal", "lead", "customer")}[body["with"]]
+        if d["entity_type"] not in ok:
+            raise HTTPException(422, f"Only {' or '.join(ok)} documents can be shared with the {body['with']}")
+        share = bool(body.get("share"))
+        field = f"share_with_{body['with']}"
+        await db.documents.update_one({"id": did}, {"$set": {field: share}})
+        await audit(user, f"document_{'shared' if share else 'unshared'}_{body['with']}", "documents", did)
+        return {"ok": True, field: share}
     if d["entity_type"] not in ("property", "owner"):
         raise HTTPException(422, "Only property or owner documents can be shared with the owner")
     share = bool(body.get("share"))
@@ -597,7 +607,8 @@ async def decide(aid: str, body: dict, user=Depends(staff_user)):
 SETTINGS_FIELDS = ["name", "legal_name", "phone", "whatsapp", "email", "address", "gstin", "gst_enabled", "gst_rate",
                    "cities", "localities", "approvals", "demo_mode", "invoice_due_days", "office_hours", "enquiry_routing",
                    "rera_no", "social", "mfa_required_roles", "email_notifications", "map_center", "agreement_signatory",
-                   "agreement_signatory_designation", "targets", "health_weights"]
+                   "agreement_signatory_designation", "targets", "health_weights", "pay_upi_id", "pay_account_name",
+                   "pay_bank_name", "pay_account_no", "pay_ifsc", "pay_note"]
 CMS_FIELDS = ["hero_title", "hero_subtitle", "seo_title", "seo_description", "testimonials", "announcement"]
 
 
@@ -624,6 +635,14 @@ async def put_settings(body: dict, user=Depends(staff_user)):
         if user["role"] in roles and not user.get("mfa_enabled"):
             raise HTTPException(422, "Turn on 2-step sign-in for your own account first, then require it for your role")
         upd["mfa_required_roles"] = roles
+    for k in [k for k in upd if k.startswith("pay_")]:
+        upd[k] = str(upd[k] or "").strip()[:300 if k == "pay_note" else 80] or None
+    if upd.get("pay_upi_id") and not re.fullmatch(r"[\w.\-]{2,64}@[A-Za-z][\w]{1,30}", upd["pay_upi_id"]):
+        raise HTTPException(422, "Enter a UPI ID like estates@okaxis")
+    if upd.get("pay_ifsc") and not re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}", upd["pay_ifsc"].upper()):
+        raise HTTPException(422, "Enter a valid 11-character IFSC")
+    if upd.get("pay_ifsc"):
+        upd["pay_ifsc"] = upd["pay_ifsc"].upper()
     if "social" in upd:
         upd["social"] = {k: str(v)[:200] for k, v in (upd["social"] or {}).items()
                          if k in ("facebook", "instagram", "youtube", "linkedin", "x", "google_business") and v}

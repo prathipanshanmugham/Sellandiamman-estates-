@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, fmtDateTime, inr, label, opts, openFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { PageHeader, DataTable, Badge, FormDialog, Section, Facts, useList, act } from "../../components/erp/kit";
+import { DocsPanel } from "./Documents";
 
 export function Deals() {
   const nav = useNavigate();
@@ -75,6 +76,7 @@ export function DealDetail() {
         <Section title="Document checklist">{d.checklist.map((it, i) => <label key={i} className="flex items-center gap-2 border-b border-slate-100 py-1.5 text-sm"><input type="checkbox" checked={it.done} disabled={!w || !open} onChange={async (e) => { const cl = d.checklist.map((x, j) => (j === i ? { ...x, done: e.target.checked } : x)); await act(() => api.patch(`/deals/${id}`, { checklist: cl })); load(); }} data-testid={`checklist-${i}`} />{it.item}</label>)}</Section>
         {d.approvals?.length > 0 && <Section title="Approvals">{d.approvals.map((a) => <p key={a.id} className="flex justify-between border-b border-slate-100 py-1.5 text-sm"><span>{a.summary}</span><Badge v={a.status} /></p>)}</Section>}
         <Section title="History">{d.history.map((h, i) => <p key={i} className="border-b border-slate-100 py-1 text-xs text-slate-600">{fmtDateTime(h.at)} · {h.by} · {h.event}</p>)}</Section>
+        <DocsPanel entityType="deal" entityId={d.id} title="Deal documents (tick “Buyer can see” to show one in the buyer's portal)" defaultType="agreement" />
       </div>
       <FormDialog open={dlg === "offer"} onClose={() => setDlg("")} title="Record offer" fields={[{ name: "party", label: "Offered by", required: true }, { name: "amount", label: d.deal_type === "sale" ? "Offer amount (₹)" : "Monthly rent (₹)", type: "number", required: true }, { name: "terms", label: "Terms", type: "textarea", full: true }]} initial={{ party: d.buyer_name }} onSubmit={async (v) => { await api.post(`/deals/${id}/offers`, v); load(); }} />
       <FormDialog open={dlg === "cancel"} onClose={() => setDlg("")} title="Cancel or dispute deal" initial={{ status: "cancelled" }} fields={[{ name: "status", label: "Status", type: "select", required: true, options: opts(["cancelled", "disputed"]) }, { name: "reason", label: "Reason", type: "textarea", required: true, full: true }]} onSubmit={async (v) => { await api.post(`/deals/${id}/cancel`, v); load(); }} />

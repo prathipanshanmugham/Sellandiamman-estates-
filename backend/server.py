@@ -25,16 +25,21 @@ import routes_agreements
 import routes_cms
 import routes_ceo
 import routes_seo
+import routes_tickets
+import routes_bills
+import routes_tenant
+import routes_buyer
+import routes_vault
 from seed import seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-APP_VERSION = "2026.10.3"
+APP_VERSION = "2026.10.4"
 app = FastAPI(title="Sellandiamman Estates API", version=APP_VERSION, docs_url="/api/docs",
               openapi_url="/api/openapi.json")
 
 for r in (routes_auth, routes_public, routes_crm, routes_props, routes_deals, routes_finance, routes_ops, routes_admin,
           routes_content, routes_portal, routes_branches, routes_customers, routes_channels, routes_investors, routes_agreements,
-          routes_cms, routes_ceo, routes_seo):
+          routes_cms, routes_ceo, routes_seo, routes_tickets, routes_bills, routes_tenant, routes_buyer, routes_vault):
     app.include_router(r.router, prefix="/api")
 
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", SITE_URL).split(",") if o.strip()]
@@ -74,6 +79,7 @@ async def _automation_loop():
         await asyncio.sleep(3600)
         try:
             await routes_admin.run_automations()
+            await routes_vault.rotation_reminders()
         except Exception:
             logger.exception("Automation run failed")
 
@@ -90,6 +96,8 @@ async def _frequent_loop():
 @app.on_event("startup")
 async def startup():
     await seed()
+    if not routes_vault.configured():
+        logger.warning("VAULT_KEY is not set: the password vault is switched off. See DEPLOYMENT.md, 'Password vault'.")
     if os.environ.get("DISABLE_AUTOMATIONS") != "true":
         asyncio.create_task(_automation_loop())
         asyncio.create_task(_frequent_loop())

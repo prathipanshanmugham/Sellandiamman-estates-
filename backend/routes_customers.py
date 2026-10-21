@@ -304,7 +304,80 @@ async def get_customer(cid: str, user=Depends(require("customers", "r"))):
         rm = await db.users.find_one({"id": c["rm_id"]}, {"_id": 0, "name": 1})
         c["rm_name"] = rm and rm["name"]
     c["kyc_documents"] = await db.documents.count_documents({"entity_type": "customer", "entity_id": cid, "doc_type": "kyc", "is_latest": True})
+    if can(user, "users", "r"):
+        c["logins"] = await customer_logins(c)
+    c["login_types"] = await login_types(c)
+    c["tickets"] = await db.tickets.find({"customer_id": cid}, {"_id": 0, "id": 1, "code": 1, "title": 1, "status": 1,
+                                                                "created_at": 1}).sort("created_at", -1).to_list(50)
     return c
+
+
+# ---------------- Customer sign-ins (tenant, owner / lessor, investor, buyer) ----------------
+LOGIN_LABEL = {"tenant": "tenant", "owner": "owner / lessor", "investor": "investor", "buyer": "buyer"}
+
+
+async def customer_logins(c):
+    q = [{"customer_id": c["id"]}]
+    if c.get("owner"):
+        q.append({"owner_id": c["owner"]["id"]})
+    if c.get("investor"):
+        q.append({"investor_id": c["investor"]["id"]})
+    return await db.users.find({"$or": q, "role": {"$in": list(LOGIN_LABEL)}},
+                               {"_id": 0, "id": 1, "email": 1, "role": 1, "active": 1, "last_login": 1, "created_at": 1}).to_list(20)
+
+
+async def login_types(c):
+    """Which customer sign-ins make sense for this person, and why one cannot be made yet."""
+    owner = c.get("owner") or await db.owners.find_one({"customer_id": c["id"], "deleted": {"$ne": True}}, {"_id": 0, "id": 1})
+    inv = c.get("investor") or await db.investors.find_one({"customer_id": c["id"], "deleted": {"$ne": True}}, {"_id": 0, "id": 1})
+    has_lease = await db.leases.count_documents({"customer_id": c["id"]}) > 0
+    return [{"type": "tenant", "ok": has_lease, "why": None if has_lease else "No lease with us yet"},
+            {"type": "owner", "ok": bool(owner), "why": None if owner else "Not added as an owner yet"},
+            {"type": "investor", "ok": bool(inv), "why": None if inv else "Not added as an investor yet"},
+            {"type": "buyer", "ok": True, "why": None}]
+
+
+async def create_customer_login(kind, cid, email, user):
+    from routes_auth import create_user, UserIn, EMAIL_RE
+    if kind not in LOGIN_LABEL:
+        raise HTTPException(422, "Choose the type of login")
+    if not can(user, "users", "w"):
+        raise HTTPException(403, "Only administrators create logins")
+    c = await db.customers.find_one({"id": cid, "deleted": {"$ne": True}, "merged_into": None}, {"_id": 0})
+    if not c:
+        raise HTTPException(404, "Customer not found")
+    email = (email or c.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(422, "Add the customer's email address first")
+    if not re.match(EMAIL_RE, email):
+        raise HTTPException(422, "Enter a valid email address")
+    allowed = {t["type"]: t for t in await login_types(c)}
+    if not allowed[kind]["ok"]:
+        raise HTTPException(422, f"Cannot make a {LOGIN_LABEL[kind]} login: {allowed[kind]['why'].lower()}")
+    extra = {}
+    if kind == "owner":
+        extra["owner_id"] = (await db.owners.find_one({"customer_id": cid, "deleted": {"$ne": True}}, {"_id": 0, "id": 1}))["id"]
+    elif kind == "investor":
+        extra["investor_id"] = (await db.investors.find_one({"customer_id": cid, "deleted": {"$ne": True}}, {"_id": 0, "id": 1}))["id"]
+    else:
+        extra["customer_id"] = cid
+    out = await create_user(UserIn(email=email, name=c["name"][:100], role=kind, phone=c.get("phone"), **extra), user)
+    upd = {"updated_at": now_iso()}
+    if not c.get("email"):
+        upd["email"] = email
+    op = {"$set": upd}
+    if kind in ("tenant", "buyer", "owner", "investor"):
+        op["$addToSet"] = {"types": kind}
+    await db.customers.update_one({"id": cid}, op)
+    await audit(user, "customer_login_created", "customers", cid, {"type": kind, "email": email})
+    return out
+
+
+@router.post("/customers/{cid}/logins")
+async def new_customer_login(cid: str, body: dict, user=Depends(require("users", "w"))):
+    if can(user, "customers", "r"):
+        await _get(user, cid)
+    return await create_customer_login(body.get("type") or "", cid, body.get("email"), user)
 
 
 @router.patch("/customers/{cid}")

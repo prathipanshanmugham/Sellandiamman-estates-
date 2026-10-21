@@ -49,7 +49,11 @@ async def overview(user=Depends(owner_user)):
         if nxt:
             due_soon.append({"lease_code": ls["code"], "property_title": ls["property_title"], "period": nxt["period"],
                              "due_date": nxt["due_date"], "balance": round(nxt["amount"] - nxt["paid"], 2)})
+    bills_open = await db.lease_charges.count_documents({"owner_id": oid, "status": {"$in": ["due", "partly_paid"]}})
+    open_tickets = await db.tickets.count_documents({"$or": [{"raised_by.user_id": user["id"]}, {"owner_id": oid, "visible_to_owner": True}],
+                                                     "status": {"$in": ["open", "acknowledged", "in_progress", "on_hold"]}})
     return {"owner": owner, "properties": props, "month": month, "this_month": calc, "arrears": arrears,
+            "bills_open": bills_open, "open_tickets": open_tickets,
             "active_leases": len(leases), "occupied": sum(1 for p in props if p.get("occupancy") == "occupied"),
             "last_statement": last[0] if last else None, "open_requests": open_wo, "upcoming_stays": upcoming,
             "rent_due": sorted(due_soon, key=lambda x: x["due_date"])[:10]}
@@ -82,8 +86,10 @@ async def statement(month: str, user=Depends(owner_user)):
         raise HTTPException(422, "Month must be YYYY-MM")
     rents, exps, calc = await _statement_data(user["owner_id"], month)
     settled = await db.owner_statements.find_one({"owner_id": user["owner_id"], "month": month}, {"_id": 0, "by": 0})
+    from routes_ops import owner_charge_items
     return {"month": month, "rents": [{k: r.get(k) for k in ("date", "lease_code", "period", "amount", "receipt_no")}
-                                      for r in rents], **calc, "expense_items": exps, "settled": settled}
+                                      for r in rents], **calc, "expense_items": exps,
+            "charge_items": await owner_charge_items(user["owner_id"], month), "settled": settled}
 
 
 @router.get("/statements/{month}/pdf")
@@ -134,6 +140,14 @@ async def raise_request(body: RequestIn, user=Depends(owner_user)):
     await audit(user, "portal_request", "maintenance", wo["id"])
     wo.pop("created_by")
     return wo
+
+
+@router.get("/bills")
+async def bills(user=Depends(owner_user)):
+    """Tenant bills on the owner's properties (EB, water, maintenance…) and whether they are paid."""
+    from routes_bills import charge_view
+    rows = await db.lease_charges.find({"owner_id": user["owner_id"]}, {"_id": 0, "created_by": 0, "customer_id": 0}).sort("due_date", -1).to_list(1000)
+    return [charge_view(r) for r in rows]
 
 
 @router.get("/bookings")

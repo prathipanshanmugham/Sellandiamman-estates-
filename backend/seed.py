@@ -60,6 +60,22 @@ async def ensure_indexes():
     await db.migrations.create_index("id", unique=True)
     for c in ("leads", "properties", "leases", "bookings", "invoices", "ledger_entries", "expenses", "deals", "work_orders"):
         await db[c].create_index("branch_id")
+    # Round 5: customer portals, tickets, tenant bills, password vault
+    for c in ("tickets", "lease_charges", "charge_payments", "payment_notices", "vault_items", "vault_history"):
+        await db[c].create_index("id", unique=True)
+    await db.tickets.create_index("code", unique=True)
+    await db.tickets.create_index([("branch_id", 1), ("status", 1), ("last_message_at", -1)])
+    await db.tickets.create_index("customer_id", sparse=True)
+    await db.tickets.create_index("owner_id", sparse=True)
+    await db.tickets.create_index("raised_by.user_id")
+    await db.lease_charges.create_index([("lease_id", 1), ("due_date", -1)])
+    await db.lease_charges.create_index("owner_id")
+    await db.charge_payments.create_index("idempotency_key", unique=True)
+    await db.charge_payments.create_index([("owner_id", 1), ("month", 1)])
+    await db.payment_notices.create_index("idempotency_key", unique=True)
+    await db.payment_notices.create_index([("lease_id", 1), ("status", 1)])
+    await db.users.create_index("customer_id", sparse=True)
+    await db.vault_history.create_index([("item_id", 1), ("at", -1)])
 
 
 async def seed_core():
@@ -1007,6 +1023,7 @@ async def seed_demo():
     await agreement("investor_coinvestment", "investment", invs[(I1["id"], P1["id"])]["id"], director,
                     {"investor_address": "45, Teachers Colony, Erode 638011"}, final=True, share=True)
     await customers_demo(owners)
+    await round5_demo(t, pw, users, owners, props, ls1, ls2, L, pm, v2, key)
     await db.settings.update_one({"id": "company"}, {"$set": {"targets": {"monthly_revenue": {
         "br-erode": 150000, "br-perundurai": 120000, "br-namakkal": 50000, "br-sathyamangalam": 40000, "br-kadambur": 20000}}}})
 
@@ -1015,6 +1032,139 @@ async def seed_demo():
     await notify([users["director"]["id"], admin["id"]], "Approval needed: commission change",
                  f"{d4['code']}: commission → 1.25%", "/erp/approvals", dedupe="seed-ap")
     logger.info("Demo data seeded")
+
+
+async def round5_demo(t, pw, users, owners, props, ls1, ls2, L, pm, v2, key):
+    """Customer sign-ins (tenant, buyer), tenant bills, service tickets, payment details and vault logins."""
+    import routes_bills as bills
+    import routes_tickets as tk
+    from core import clear_settings_cache
+    await db.settings.update_one({"id": "company"}, {"$set": {
+        "pay_upi_id": "sellandiamman.demo@example", "pay_account_name": "Sellandiamman Estates – Owner Funds A/c",
+        "pay_bank_name": "Demo Bank, Erode", "pay_account_no": "000011112222", "pay_ifsc": "DEMO0000001",
+        "pay_note": "Sample details for the preview. Pay rent by the 5th; write your lease code in the payment note."}})
+    clear_settings_cache()
+    l1 = await db.leases.find_one({"id": ls1["id"]}, {"_id": 0})
+    tenant = {"id": new_id(), "email": f"tenant@{DEMO_DOMAIN}", "name": l1["tenant_name"], "role": "tenant",
+              "customer_id": l1["customer_id"], "active": True, "branch_ids": [], "password_hash": hash_password(pw),
+              "phone": l1["tenant_phone"], "created_at": _iso(t - timedelta(days=50))}
+    await db.users.update_one({"email": tenant["email"]}, {"$setOnInsert": tenant}, upsert=True)
+    tenant = await db.users.find_one({"email": tenant["email"]}, {"_id": 0, "password_hash": 0})
+    await db.customers.update_one({"id": l1["customer_id"]}, {"$set": {"email": f"tenant@{DEMO_DOMAIN}"}})
+    buyer_lead = await db.leads.find_one({"id": L[3]["id"]}, {"_id": 0})
+    buyer = None
+    if buyer_lead and buyer_lead.get("customer_id"):
+        buyer = {"id": new_id(), "email": f"buyer@{DEMO_DOMAIN}", "name": buyer_lead["name"], "role": "buyer",
+                 "customer_id": buyer_lead["customer_id"], "active": True, "branch_ids": [], "password_hash": hash_password(pw),
+                 "phone": buyer_lead["phone"], "created_at": _iso(t - timedelta(days=20))}
+        await db.users.update_one({"email": buyer["email"]}, {"$setOnInsert": buyer}, upsert=True)
+        buyer = await db.users.find_one({"email": buyer["email"]}, {"_id": 0, "password_hash": 0})
+        for i, p in enumerate((props[7], props[0], props[3])):
+            await db.lead_activities.insert_one({"id": new_id(), "lead_id": L[3]["id"], "kind": "shared_listing", "notes": f"Shared listing {p.get('listing_id') or p['code']}",
+                                                 "property_id": p["id"], "user_id": users["sales_agent"]["id"], "user_name": users["sales_agent"]["name"],
+                                                 "created_at": _iso(t - timedelta(days=12 - i), 11)})
+    owner_user = await db.users.find_one({"email": f"owner@{DEMO_DOMAIN}"}, {"_id": 0, "password_hash": 0})
+
+    # ---- bills on the furnished flat (EB by meter, water, association maintenance paid direct) and the showroom
+    def m(n):
+        return _month_shift(t, n).strftime("%Y-%m")
+
+    async def bill(ls, kind, period, due, paid_on=None, **kw):
+        c = await bills.add_charge(ls["id"], bills.ChargeIn(kind=kind, period=period, due_date=due, **kw), pm)
+        await db.lease_charges.update_one({"id": c["id"]}, {"$set": {"created_at": _iso(datetime.fromisoformat(due).date() - timedelta(days=10))}})
+        if paid_on:
+            p, _ = await bills.apply_charge_payment(await db.lease_charges.find_one({"id": c["id"]}, {"_id": 0}),
+                                                    {"amount": c["amount"], "date": paid_on, "method": "upi", "reference": f"UPI-{len(period)}{c['code'][-3:]}",
+                                                     "idempotency_key": key()}, pm)
+            await db.ledger_entries.update_many({"ref_id": p["id"]}, {"$set": {"posted_at": _iso(datetime.fromisoformat(paid_on).date(), 12)}})
+        return c
+    d = lambda n, day: _month_shift(t, n).replace(day=day).isoformat()  # noqa: E731
+    paid = lambda n, day: min(_month_shift(t, n).replace(day=day), t).isoformat()  # noqa: E731
+    await bill(ls1, "electricity", m(-3), d(-1, 10), paid(-1, 8), period_to=m(-2), consumer_no="04-123-456-789", reading_prev=4521,
+               reading_curr=4987, rate=6.5, fixed=120, mode="collect", payee="owner")
+    soon = (t + timedelta(days=7)).isoformat()
+    eb_now = await bill(ls1, "electricity", m(-1), soon, period_to=m(0), consumer_no="04-123-456-789", reading_prev=4987,
+                        reading_curr=5402, rate=6.5, fixed=120, mode="collect", payee="owner")
+    await bill(ls1, "water", m(-1), d(-1, 10), paid(-1, 6), amount=300, mode="collect", payee="owner")
+    water = await bill(ls1, "water", m(0), soon, amount=300, mode="collect", payee="owner")
+    await bill(ls1, "maintenance", m(-1), d(-1, 10), paid(-1, 9), amount=1500, mode="direct", payee="owner",
+               label=f"Association maintenance {bills.period_text(m(-1))}", notes="Paid to Green Park Residents' Association")
+    await bill(ls1, "maintenance", m(0), soon, amount=1500, mode="direct", payee="owner", label=f"Association maintenance {bills.period_text(m(0))}",
+               notes="Pay to Green Park Residents' Association")
+    await bill(ls2, "electricity", m(-1), soon, amount=18640, mode="direct", payee="owner", consumer_no="04-778-210-031",
+               notes="Commercial LT connection in the tenant's name")
+    # the tenant says they paid the water bill; staff will check and confirm
+    await db.payment_notices.insert_one({"id": new_id(), "lease_id": ls1["id"], "lease_code": ls1["code"], "property_title": ls1["property_title"],
+                                         "tenant_name": ls1["tenant_name"], "user_id": tenant["id"], "kind": "charge", "period": None,
+                                         "charge_id": water["id"], "amount": 300, "date": t.isoformat(), "method": "upi", "reference": "UPI-61884",
+                                         "note": "Paid with this month's water", "idempotency_key": key(), "label": water["label"],
+                                         "status": "pending", "created_at": _iso(t, 9)})
+    await db.lease_charges.update_one({"id": eb_now["id"]}, {"$set": {"notes": "Bi-monthly EB reading taken by the property manager"}})
+
+    # ---- service tickets from each kind of customer
+    async def ticket(u, role, cat, title, desc, prio="medium", prop=None, lease=None, days_ago=0, **extra):
+        data = {"category": cat, "title": title, "description": desc, "priority": prio, "property_id": prop and prop["id"],
+                "lease_id": lease and lease["id"], "customer_id": u.get("customer_id"), "owner_id": u.get("owner_id"),
+                "preferred_time": extra.get("preferred_time"), "permission_to_enter": extra.get("permission_to_enter", False)}
+        tt = await tk.create_ticket(data, u, role, "portal")
+        when = t - timedelta(days=days_ago)
+        await db.tickets.update_one({"id": tt["id"]}, {"$set": {"created_at": _iso(when, 9), "last_message_at": _iso(when, 9),
+                                                                "messages.0.at": _iso(when, 9),
+                                                                "respond_by": tk._due(prio, 0, _iso(when, 9)), "due_at": tk._due(prio, 1, _iso(when, 9))}})
+        return tt
+    g = await ticket(tenant, "tenant", "appliance", "Geyser in the main bathroom is not heating",
+                     "Since yesterday the geyser trips the MCB when switched on. We have switched it off for now.", "high",
+                     props[1], ls1, 2, preferred_time="Weekdays after 6 pm", permission_to_enter=True)
+    await tk.staff_update(g["id"], tk.TicketPatch(assigned_to=pm["id"], note="Thanks for switching it off. Sakthi Electricals will visit tomorrow evening."), pm)
+    await tk.to_work_order(g["id"], tk.WoIn(vendor_id=v2["id"], quote_amount=1200, charge_to="owner", due_date=(t + timedelta(days=1)).isoformat()), pm)
+    h = await ticket(tenant, "tenant", "documents", "Rent receipts for HRA (April to September)",
+                     "My office needs rent receipts for April to September with the owner's PAN.", "low", props[1], ls1, 9)
+    await tk.staff_update(h["id"], tk.TicketPatch(assigned_to=pm["id"], status="resolved",
+                                                  note="All six receipts are under Rent in your portal. The owner's PAN is on the rental agreement in Documents."), pm)
+    await tk.my_rate(h["id"], tk.RateIn(stars=5, comment="Quick, thank you"), tenant)
+    await ticket(tenant, "tenant", "deep_cleaning", "Deep cleaning before Deepavali",
+                 "Kitchen, both bathrooms and the balcony. Happy to pay for it.", "low", props[1], ls1, 0,
+                 preferred_time="Saturday morning", permission_to_enter=False)
+    if owner_user:
+        o = await ticket(owner_user, "owner", "listing", "Rent revision for the showroom next year",
+                         "The lease renews in a few months. Please suggest a fair revision for the showroom.", "medium", props[5], None, 4)
+        await tk.staff_update(o["id"], tk.TicketPatch(assigned_to=users["branch_manager"]["id"],
+                                                      note="We are collecting rents of similar showrooms on Brough Road and will send a note this week."), users["director"])
+    if buyer:
+        await ticket(buyer, "buyer", "home_loan", "Help with a home loan for the Nasiyanur house",
+                     "I am in Dubai until December. Which banks lend to NRIs for this, and what documents do you need?", "medium", props[7], None, 1)
+
+    # ---- password vault (only when VAULT_KEY is set)
+    import routes_vault as vault
+    if vault.configured():
+        async def login(title, preset, username, password, roles, users_=(), fields=(), totp=None, notes=None, prop=None, days=0, by=None):
+            by = by or users["director"]
+            iid = new_id()
+            pub = [{"label": a, "value": b} for a, b, sec in fields if not sec]
+            sec = [{"label": a, "value": b} for a, b, sec_ in fields if sec_]
+            pr = vault.PRESET[preset]
+            changed = t - timedelta(days=days)
+            await db.vault_items.insert_one({
+                "id": iid, "title": title, "preset": preset, "category": pr["category"], "url": pr.get("url") or None, "username": username,
+                "fields_public": pub, "secret_labels": [x["label"] for x in sec],
+                "secret": vault.encrypt(iid, {"password": password, "totp": totp, "notes": notes or "", "fields": sec}),
+                "has_password": True, "has_totp": bool(totp), "has_notes": bool(notes), "property_ids": [prop["id"]] if prop else [],
+                "share_roles": list(roles), "share_users": [u["id"] for u in users_], "rotate_days": pr.get("rotate_days", 0), "tags": [],
+                "password_changed_at": _iso(changed), "created_by": by["id"], "created_by_name": by["name"], "created_at": _iso(changed),
+                "updated_at": _iso(changed), "deleted": False})
+        await login("Airbnb – Sellandiamman Stays", "airbnb", "stays@demo.sellandiamman.test", "Demo-Airbnb#2026", ["shortstay_ops", "branch_manager"],
+                    totp="JBSWY3DPEHPK3PXP", notes="Host account for all short-stay listings. Recovery phone: office mobile.", days=40)
+        await login("Booking.com – Riverside Farm Stay", "booking_com", "sellandiamman_rfs", "Demo-Booking#2026", ["shortstay_ops"],
+                    fields=[("Property ID", "10458732", False)], prop=props[16], days=200)
+        await login("GST portal", "gst", "SELLANDIAMMAN01", "Demo-GST#2026", ["accountant"], fields=[("GSTIN", "33ABCDE1234F1Z5", False)], days=95)
+        await login("Hostinger – website server", "hostinger", "it@demo.sellandiamman.test", "Demo-Hostinger#2026", [],
+                    notes="VPS srv-demo. Root password is kept separately by the director.", days=20)
+        await login("Google Business Profile", "google_business", "marketing@demo.sellandiamman.test", "Demo-Google#2026", ["marketing"],
+                    by=users["marketing"], days=60)
+        await login("Wi-Fi – Thindal guest house", "wifi", "Sellandiamman-Guest", "thindal2026", ["shortstay_ops", "property_manager"],
+                    prop=props[6], by=users["shortstay_ops"], days=10)
+        await login("Net banking – Owner Funds A/c", "bank", "SEFUNDS", "Demo-Bank#2026", ["accountant"],
+                    fields=[("Corporate ID", "SE0001", False), ("Transaction password", "Demo-Txn#2026", True)], days=120)
 
 
 async def customers_demo(owners):

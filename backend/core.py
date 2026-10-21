@@ -50,38 +50,46 @@ ROLES = {
     "marketing": "Marketing Staff",
     "shortstay_ops": "Short-Stay Operations",
     "auditor": "Read-Only Auditor",
-    "owner": "Property Owner (portal)",
+    "owner": "Owner / Lessor (portal)",
     "investor": "Investor (portal)",
+    "tenant": "Tenant (portal)",
+    "buyer": "Buyer / Client (portal)",
 }
-PORTAL_ROLES = ("owner", "investor")
+# Customer sign-ins. Each sees only their own records in their own portal: owner/lessor (/owner), investor (/investor),
+# tenant (/tenant) and buyer (/buyer). Tenant and buyer accounts are tied to a customer record (customer_id).
+PORTAL_ROLES = ("owner", "investor", "tenant", "buyer")
 STAFF_ROLES = [r for r in ROLES if r not in PORTAL_ROLES]
 MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases",
            "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users",
-           "settings", "audit"]
+           "settings", "audit", "vault"]
 # r=read w=write a=approve e=export p=publish
 PERMS = {
     "super_admin": {m: "rwaep" for m in MODULES},
-    "director": {**{m: "rwae" for m in MODULES}, "users": "r", "settings": "r", "properties": "rwaep", "cms": "rwp"},
+    "director": {**{m: "rwae" for m in MODULES}, "users": "r", "settings": "r", "properties": "rwaep", "cms": "rwp",
+                 "vault": "rwa"},
     "branch_manager": {"dashboard": "r", "ceo": "re", "leads": "rwe", "customers": "rwe", "properties": "rwaep",
                        "owners": "rw", "deals": "rwe", "finance": "r", "leases": "rw", "maintenance": "rw",
                        "shortstay": "rw", "documents": "rw", "agreements": "rw", "tasks": "rw", "reports": "re",
-                       "cms": "rwp", "users": "r"},
+                       "cms": "rwp", "users": "r", "vault": "rw"},
     "sales_agent": {"dashboard": "r", "leads": "rw", "customers": "rw", "properties": "rw", "owners": "r",
-                    "deals": "rw", "tasks": "rw", "documents": "rw", "agreements": "rw"},
+                    "deals": "rw", "tasks": "rw", "documents": "rw", "agreements": "rw", "vault": "r"},
     "property_manager": {"dashboard": "r", "properties": "r", "owners": "r", "customers": "r", "leases": "rw",
-                         "maintenance": "rw", "documents": "rw", "agreements": "rw", "tasks": "rw"},
+                         "maintenance": "rw", "documents": "rw", "agreements": "rw", "tasks": "rw", "vault": "r"},
     "accountant": {"dashboard": "r", "ceo": "re", "finance": "rwe", "deals": "r", "leases": "r", "shortstay": "r",
                    "owners": "r", "customers": "r", "investors": "rwe", "agreements": "r", "reports": "re",
-                   "tasks": "rw", "maintenance": "r"},
-    "marketing": {"dashboard": "r", "properties": "rp", "cms": "rwp", "leads": "r", "tasks": "rw"},
+                   "tasks": "rw", "maintenance": "r", "vault": "rw"},
+    "marketing": {"dashboard": "r", "properties": "rp", "cms": "rwp", "leads": "r", "tasks": "rw", "vault": "rw"},
     "shortstay_ops": {"dashboard": "r", "shortstay": "rw", "maintenance": "rw", "properties": "r", "tasks": "rw",
-                      "documents": "r"},
+                      "documents": "r", "vault": "rw"},
     "auditor": {"dashboard": "r", "ceo": "re", "leads": "r", "customers": "r", "properties": "r", "owners": "r",
                 "deals": "r", "finance": "r", "leases": "r", "maintenance": "r", "shortstay": "r", "investors": "r",
                 "agreements": "r", "reports": "re", "audit": "r"},
-    # Owners and investors use their own portals (/api/portal/*, /api/investor/*), scoped to their own records.
+    # Customers use their own portals (/api/portal/*, /api/investor/*, /api/tenant/*, /api/buyer/*, /api/my/*),
+    # scoped to their own records. The auditor never sees the password vault.
     "owner": {},
     "investor": {},
+    "tenant": {},
+    "buyer": {},
 }
 # Record scope: these roles only see records where field == their user id
 OWN_SCOPE = {
@@ -194,7 +202,7 @@ def public_user(u, settings=None):
            "role_label": ROLES.get(u["role"]), "branch_ids": u.get("branch_ids", []), "active": u.get("active"),
            "phone": u.get("phone"), "permissions": PERMS.get(u["role"], {}), "created_at": u.get("created_at"),
            "mfa_enabled": bool(u.get("mfa_enabled")), "owner_id": u.get("owner_id"),
-           "investor_id": u.get("investor_id"), "last_login": u.get("last_login"),
+           "investor_id": u.get("investor_id"), "customer_id": u.get("customer_id"), "last_login": u.get("last_login"),
            "all_branches": u["role"] in ALL_BRANCH_ROLES or not u.get("branch_ids"),
            **{k: u.get(k) for k in PROFILE_FIELDS}}
     if settings is not None:
@@ -246,6 +254,28 @@ async def owner_user(request: Request):
     user = await current_user(request)
     if user["role"] != "owner" or not user.get("owner_id"):
         raise HTTPException(403, "This area is for property owners")
+    return user
+
+
+async def tenant_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "tenant" or not user.get("customer_id"):
+        raise HTTPException(403, "This area is for tenants")
+    return user
+
+
+async def buyer_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "buyer" or not user.get("customer_id"):
+        raise HTTPException(403, "This area is for buyers and clients")
+    return user
+
+
+async def portal_user(request: Request):
+    """Any customer sign-in (owner, investor, tenant, buyer)."""
+    user = await current_user(request)
+    if user["role"] not in PORTAL_ROLES:
+        raise HTTPException(403, "This area is for customer accounts")
     return user
 
 

@@ -53,6 +53,7 @@ shutil.copytree(ROOT / "build/pdf", OUT / "pdf")
 for f in ("favicon.svg", "icon-192.png"):
     shutil.copy(SITE / f, OUT / f)
 
+BOOT_MARK = (SITE / "brand/mark.svg").read_text().replace("<svg ", '<svg width="48" height="20" aria-hidden="true" ', 1).replace('role="img" ', "")
 page = f"""<title>Sellandiamman Estates</title>
 <meta name="theme-color" content="#0F172A">
 <meta name="description" content="Preview of the Sellandiamman Estates website, staff workspace and owner portal with sample data.">
@@ -67,7 +68,7 @@ page = f"""<title>Sellandiamman Estates</title>
   body::before {{ content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 70; background: #ffffff; }}
   #boot {{ display: flex; min-height: 60vh; align-items: center; justify-content: center; gap: 12px; font: 500 14px/1.4 system-ui, sans-serif; color: #64748b; }}
 </style>
-<div id="root"><div id="boot"><svg width="46" height="20" viewBox="0 0 267.48 115.45" aria-hidden="true"><path fill="#96979B" d="{(SITE / 'brand/mark.svg').read_text().split('d="')[1].split('"')[0]}"/></svg>Loading Sellandiamman Estates…</div></div>
+<div id="root"><div id="boot">{BOOT_MARK}Loading Sellandiamman Estates…</div></div>
 <script defer src="{js}"></script>
 """
 (OUT / "index.html").write_text(page)

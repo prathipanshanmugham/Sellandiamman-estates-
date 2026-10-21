@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, AlertTriangle } from "lucide-react";
-import { api, fmtDate, fmtDateTime, inr, label, opts, openFile } from "../../lib/api";
+import { api, errMsg, fmtDate, fmtDateTime, inr, label, opts, openFile } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useDialog } from "../../lib/dialogs";
-import { PageHeader, DataTable, Badge, FormDialog, Section, Field, useList, act } from "../../components/erp/kit";
+import { PageHeader, DataTable, Badge, FormDialog, Section, Field, Modal, useList, act } from "../../components/erp/kit";
 
 export function Tasks() {
   const { can, user } = useAuth();
@@ -75,25 +75,65 @@ const profileFields = (staff, self) => [
   { name: "phone", label: "Phone" }, { name: "whatsapp", label: "WhatsApp" }, { name: "joined_on", label: "Joined on", type: "date" },
 ];
 
+const LOGIN_KIND = { tenant: "Tenant", owner: "Owner / lessor", buyer: "Buyer", investor: "Investor" };
+
+// Find the customer, choose the kind of login (tenant, owner / lessor, buyer, investor) and send the set-password link.
+function CustomerLoginDialog({ open, onClose, onDone }) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState([]);
+  const [c, setC] = useState(null);
+  const [v, setV] = useState({ type: "", email: "" });
+  const [st, setSt] = useState({ busy: false, err: "" });
+  useEffect(() => { if (open) { setQ(""); setHits([]); setC(null); setV({ type: "", email: "" }); setSt({ busy: false, err: "" }); } }, [open]);
+  useEffect(() => {
+    if (!open || q.trim().length < 2) { setHits([]); return undefined; }
+    const t = setTimeout(() => api.get("/customers", { params: { q, limit: 8 } }).then((r) => setHits(r.data.items)).catch(() => setHits([])), 250);
+    return () => clearTimeout(t);
+  }, [q, open]);
+  const choose = async (x) => { const r = await act(() => api.get(`/customers/${x.id}`)); if (r) { setC(r.data); const have = new Set((r.data.logins || []).map((u) => u.role)); const first = r.data.login_types.find((t) => t.ok && !have.has(t.type)); setV({ type: first?.type || "", email: r.data.email || "" }); } };
+  const submit = async (e) => {
+    e.preventDefault(); setSt({ busy: true, err: "" });
+    try { const r = await api.post(`/customers/${c.id}/logins`, v); onClose(); onDone(r.data); } catch (ex) { setSt({ busy: false, err: errMsg(ex) }); }
+  };
+  const have = new Set((c?.logins || []).map((u) => u.role));
+  return (
+    <Modal open={open} onClose={onClose} title="Customer login">
+      {!c ? <div className="space-y-3" data-testid="customer-login-search">
+        <p className="text-sm text-slate-600">Tenants, owners (lessors), buyers and investors each get their own portal. Find the customer first.</p>
+        <input className="inp" autoFocus placeholder="Name, mobile, email or code" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find customer" data-testid="customer-login-q" />
+        <ul className="divide-y divide-slate-100">{hits.map((x) => <li key={x.id}><button type="button" className="w-full py-2 text-left text-sm hover:bg-slate-50" onClick={() => choose(x)}><b>{x.name}</b> · {x.code} · {x.phone}<span className="block text-xs text-slate-500">{(x.types || []).join(", ")}</span></button></li>)}</ul>
+      </div> : <form onSubmit={submit} className="space-y-4" data-testid="customer-login-form">
+        <p className="text-sm"><b>{c.name}</b> · {c.code} <button type="button" className="ml-2 text-xs underline" onClick={() => setC(null)}>Change</button></p>
+        {(c.logins || []).length > 0 && <p className="text-xs text-slate-500">Already has: {c.logins.map((u) => `${LOGIN_KIND[u.role] || u.role} (${u.email})`).join(", ")}</p>}
+        <div><label className="lbl" htmlFor="cl-type">Kind of login</label><select id="cl-type" className="inp" required value={v.type} onChange={(e) => setV({ ...v, type: e.target.value })} data-testid="customer-login-type"><option value="">Choose…</option>{c.login_types.map((t) => <option key={t.type} value={t.type} disabled={!t.ok || have.has(t.type)}>{LOGIN_KIND[t.type]}{have.has(t.type) ? " (already has one)" : !t.ok ? ` (${t.why.toLowerCase()})` : ""}</option>)}</select></div>
+        <div><label className="lbl" htmlFor="cl-email">Their email</label><input id="cl-email" type="email" className="inp" required value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} data-testid="customer-login-email" /></div>
+        {st.err && <p className="text-sm text-red-700" role="alert">{st.err}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" className="btn-line" onClick={onClose}>Cancel</button><button className="btn-dark" disabled={st.busy || !v.type} data-testid="customer-login-submit">Create login</button></div>
+      </form>}
+    </Modal>
+  );
+}
+
 export function Users() {
   const { can, user } = useAuth();
   const dialog = useDialog();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [investorOpen, setInvestorOpen] = useState(false);
+  const [custOpen, setCustOpen] = useState(false);
   const { rows, reload, loading } = useList("/users");
   const { rows: roles } = useList("/roles");
   const { rows: branches } = useList("/branches");
   const { rows: investors } = useList(can("investors") ? "/investors" : "/branches");
   const w = can("users", "w");
-  const PORTAL = ["owner", "investor"];
+  const PORTAL = ["owner", "investor", "tenant", "buyer"];
   const roleOpts = roles.filter((r) => !PORTAL.includes(r.key) && (r.key !== "super_admin" || user.role === "super_admin")).map((r) => ({ value: r.key, label: r.label }));
   const staff = rows.filter((u) => !PORTAL.includes(u.role) && u.active);
   const bname = (u) => (PORTAL.includes(u.role) ? "-" : u.branch_ids?.length ? u.branch_ids.map((id) => branches.find((b) => b.id === id)?.name || id).join(", ") : "All");
   const showLink = (title, d) => dialog.notice({ title, body: d.email_status === "sent" ? "We emailed the link. You can also share it yourself:" : "Email is not set up on this server, so share this one-time link with the person securely (for example on WhatsApp):", copy: d.link || d.activation_link });
   return (
     <div>
-      <PageHeader title="Users & roles" sub="Only administrators create accounts. Changing a role or deactivating someone signs them out everywhere.">{w && can("investors") && <button className="btn-line btn-sm" onClick={() => setInvestorOpen(true)} data-testid="new-investor-user-btn">Investor login</button>}{w && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-user-btn">New staff user</button>}</PageHeader>
+      <PageHeader title="Users & roles" sub="Only administrators create accounts. Changing a role or deactivating someone signs them out everywhere.">{w && can("customers") && <button className="btn-line btn-sm" onClick={() => setCustOpen(true)} data-testid="new-customer-login-btn">Customer login</button>}{w && can("investors") && <button className="btn-line btn-sm" onClick={() => setInvestorOpen(true)} data-testid="new-investor-user-btn">Investor login</button>}{w && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-user-btn">New staff user</button>}</PageHeader>
       <DataTable testid="users-table" loading={loading} rows={rows} columns={[
         { key: "name", label: "Name", render: (u) => <>{u.name}{u.mfa_enabled && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700">2-step</span>}{u.designation && <span className="block text-xs text-slate-500">{u.designation}</span>}</> }, { key: "email", label: "Email" },
         { key: "branches", label: "Branches", render: bname },
@@ -116,6 +156,7 @@ export function Users() {
         onSubmit={async (v) => { await api.patch(`/users/${edit.id}`, { name: v.name, designation: v.designation, department: v.department, reports_to: v.reports_to || null, phone: v.phone, whatsapp: v.whatsapp, joined_on: v.joined_on || null, show_in_directory: !!v.show_in_directory, branch_ids: v.branch_ids || [] }); reload(); }}>
         {(v, set) => <BranchChecks branches={branches} value={v.branch_ids} onChange={(ids) => set({ branch_ids: ids })} />}
       </FormDialog>
+      <CustomerLoginDialog open={custOpen} onClose={() => setCustOpen(false)} onDone={(d) => { reload(); setTimeout(() => showLink(`Login created for ${d.name}`, d), 50); }} />
       <FormDialog open={investorOpen} onClose={() => setInvestorOpen(false)} title="Investor dashboard login" initial={{}} fields={[{ name: "investor_id", label: "Investor", type: "select", required: true, options: (investors || []).filter((i) => i.code).map((i) => ({ value: i.id, label: `${i.code} · ${i.name}` })) }, { name: "email", label: "Email", type: "email", required: true }]}
         onSubmit={async (v) => { const r = await api.post(`/investors/${v.investor_id}/portal-invite`, { email: v.email }); reload(); if (r.data.activation_link) setTimeout(() => showLink(`Login created for ${r.data.name}`, r.data), 50); }}>
         {() => <p className="text-xs text-slate-500">They see only their own holdings, payouts, statements, documents and project updates.</p>}
@@ -178,6 +219,10 @@ export function Settings() {
         <Section title="Agreements" testid="agreement-settings"><SettingsForm fields={[{ name: "agreement_signatory", label: "Signs agreements for the company", hint: "Name printed under the company's signature" }, { name: "agreement_signatory_designation", label: "Designation", hint: "e.g. Managing Director" }]} initial={s} canEdit={sw} testid="agreement-signatory" /></Section>
         <Section title="CEO dashboard targets" testid="ceo-targets"><Targets initial={s} canEdit={sw} /></Section>
       </div>}
+      {s && can("settings") && <Section title="Rent collection account (shown to tenants)" testid="pay-settings">
+        <p className="mb-3 text-sm text-slate-600">Tenants see these details, a UPI QR code and an “Open UPI app” button with the amount filled in when they pay rent or a bill from their portal. Use the owner-funds (escrow) account where rent is collected.</p>
+        <SettingsForm fields={[{ name: "pay_upi_id", label: "UPI ID", hint: "e.g. sellandiammanrent@okaxis" }, { name: "pay_account_name", label: "Account name" }, { name: "pay_bank_name", label: "Bank and branch" }, { name: "pay_account_no", label: "Account number" }, { name: "pay_ifsc", label: "IFSC" }, { name: "pay_note", label: "Note for tenants", hint: "e.g. Pay by the 5th; write your lease code in the remarks" }]} initial={s} canEdit={sw} testid="pay-settings-form" />
+      </Section>}
       {s && can("settings") && <div className="grid gap-6 xl:grid-cols-2">
         <Section title="Social media links" testid="social-settings"><SocialSave initial={s.social || {}} canEdit={sw} /></Section>
         <Section title="Security & alerts" testid="security-policy">

@@ -113,6 +113,30 @@ function Duplicates({ open, onClose, canMerge }) {
 
 const KIND_ICON = { note: "Note", consent: "Consent", call: "Call", whatsapp: "WhatsApp", email: "Email", site_visit: "Visit", deal: "Deal", lease: "Lease", rent: "Rent", stay: "Stay", owner: "Owner", investment: "Investment", created: "Enquiry", stage_change: "Stage" };
 
+const LOGIN_TEXT = { tenant: "Tenant", owner: "Owner / lessor", investor: "Investor", buyer: "Buyer" };
+
+// Customer sign-ins: one per kind of relationship (tenant, owner / lessor, investor, buyer), each opening its own portal.
+function CustomerLogins({ c, reload }) {
+  const { can } = useAuth();
+  const dialog = useDialog();
+  const [open, setOpen] = useState(false);
+  if (!c.login_types) return null;
+  const have = new Set((c.logins || []).map((u) => u.role));
+  const choices = c.login_types.filter((t) => !have.has(t.type));
+  return (
+    <Section title="Customer logins" testid="customer-logins" actions={can("users", "w") && !c.anonymised && choices.some((t) => t.ok) && <button className="btn-line btn-sm" onClick={() => setOpen(true)} data-testid="customer-login-btn">Create a login</button>}>
+      {(c.logins || []).length ? <ul className="space-y-1.5 text-sm">{c.logins.map((u) => <li key={u.id} className="flex flex-wrap items-center gap-2"><b>{LOGIN_TEXT[u.role] || label(u.role)}</b> {u.email} <Badge v={u.active ? "active" : "invited"} />{u.last_login && <span className="text-xs text-slate-500">last signed in {fmtDate(u.last_login)}</span>}</li>)}</ul>
+        : <p className="text-sm text-slate-500">No login yet. A login lets them see their own rent, bills, statements, deal progress or investments, and raise requests.</p>}
+      {!can("users", "w") && <p className="mt-2 text-xs text-slate-400">Administrators create logins.</p>}
+      <FormDialog open={open} onClose={() => setOpen(false)} title={`Login for ${c.name}`} initial={{ type: choices.find((t) => t.ok)?.type, email: c.email || "" }}
+        fields={[{ name: "type", label: "Kind of login", type: "select", required: true, options: choices.map((t) => ({ value: t.type, label: `${LOGIN_TEXT[t.type]}${t.ok ? "" : ` (${t.why.toLowerCase()})`}` })) }, { name: "email", label: "Their email", type: "email", required: true }]}
+        onSubmit={async (v) => { const t = choices.find((x) => x.type === v.type); if (!t?.ok) throw { response: { status: 422, data: { detail: t?.why || "Not possible yet" } } }; const r = await api.post(`/customers/${c.id}/logins`, v); reload(); setTimeout(() => dialog.notice({ title: "Login created", body: r.data.email_status === "sent" ? "We emailed them a link to set a password. You can also share it yourself:" : "Email is not set up, so share this one-time link with them securely (for example on WhatsApp). It works for 7 days:", copy: r.data.activation_link }), 50); }}>
+        {() => <p className="text-xs text-slate-500">Tenants see their rent, receipts, EB and water bills and deposit; owners see their properties, statements and bills; buyers follow their purchase; investors see their holdings. Everyone can raise requests.</p>}
+      </FormDialog>
+    </Section>
+  );
+}
+
 export function CustomerDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -161,7 +185,9 @@ export function CustomerDetail() {
               {c.bookings?.map((b) => <li key={b.id}>Stay {b.code} · {b.property_title} · {fmtDate(b.check_in)} ({b.nights} nights) · <Badge v={b.status} /></li>)}
               {!c.leads?.length && !c.owner && !c.investor && !c.leases?.length && !c.bookings?.length && <li className="text-slate-400">Nothing linked yet.</li>}
             </ul>
+            {c.tickets?.length > 0 && <div className="mt-4"><p className="lbl">Requests</p><ul className="space-y-1 text-sm">{c.tickets.map((t) => <li key={t.id}><Link className="underline" to={`/erp/tickets/${t.id}`}>{t.code}</Link> {t.title} <Badge v={t.status} /></li>)}</ul></div>}
           </Section>
+          <CustomerLogins c={c} reload={load} />
         </div>
         <Section title={`Timeline (${c.timeline.length})`} testid="customer-timeline">
           {!c.timeline.length ? <p className="text-sm text-slate-400">No activity yet.</p> :

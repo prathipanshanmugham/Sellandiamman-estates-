@@ -178,6 +178,8 @@ async def get_lease(lid: str, user=Depends(require("leases", "r"))):
     lease["payments"] = await db.rent_payments.find({"lease_id": lid}, {"_id": 0}).sort("date", -1).to_list(500)
     t = today_ist().isoformat()
     lease["arrears"] = round(sum(s["amount"] - s["paid"] for s in lease["schedule"] if s["due_date"] < t), 2)
+    from routes_bills import lease_extras
+    lease.update(await lease_extras(lease, user))
     return lease
 
 
@@ -282,25 +284,38 @@ async def _statement_data(oid, month):
                                      "completed_at": {"$regex": f"^{month}"}}, {"_id": 0}).to_list(500)
     exps = [{"amount": w.get("actual_cost") or 0, "description": f"{w['code']} {w['title']}", "property_id": w["property_id"]}
             for w in wos]
-    calc = calc_owner_statement([{"amount": r["amount"], "fee_pct": r.get("mgmt_fee_pct", 0)} for r in rents], exps)
+    chg = await owner_charge_items(oid, month)
+    calc = calc_owner_statement([{"amount": r["amount"], "fee_pct": r.get("mgmt_fee_pct", 0)} for r in rents], exps, chg)
     return rents, exps, calc
 
 
-async def _by_branch(oid, rents, exps):
+async def owner_charge_items(oid, month):
+    """Bills (EB, water…) collected from tenants in the month on the owner's behalf; they pass to the owner in full."""
+    rows = await db.charge_payments.find({"owner_id": oid, "payee": "owner", "mode": "collect", "month": month},
+                                         {"_id": 0}).sort("date", 1).to_list(1000)
+    return [{"amount": r["amount"], "description": f"{r['label']} ({r['lease_code']})", "property_id": r["property_id"],
+             "date": r["date"], "receipt_no": r.get("receipt_no"), "lease_code": r["lease_code"]} for r in rows]
+
+
+async def _by_branch(oid, rents, exps, charges=()):
     """Splits a statement by the branch of each property, so every branch's books balance."""
     pb = {p["id"]: p.get("branch_id") for p in await db.properties.find({"owner_id": oid}, {"_id": 0, "id": 1, "branch_id": 1}).to_list(500)}
     out = {}
+    blank = lambda: {"rent": 0.0, "fee": 0.0, "exp": 0.0, "chg": 0.0}  # noqa: E731
     for r in rents:
-        b = out.setdefault(pb.get(r["property_id"]) or "_none", {"rent": 0.0, "fee": 0.0, "exp": 0.0})
+        b = out.setdefault(pb.get(r["property_id"]) or "_none", blank())
         b["rent"] += r["amount"]
         b["fee"] += r["amount"] * float(r.get("mgmt_fee_pct") or 0) / 100
     for e in exps:
-        b = out.setdefault(pb.get(e["property_id"]) or "_none", {"rent": 0.0, "fee": 0.0, "exp": 0.0})
+        b = out.setdefault(pb.get(e["property_id"]) or "_none", blank())
         b["exp"] += float(e["amount"] or 0)
+    for c in charges:
+        b = out.setdefault(pb.get(c["property_id"]) or "_none", blank())
+        b["chg"] += float(c["amount"] or 0)
     for b in out.values():
-        for k in ("rent", "fee", "exp"):
+        for k in ("rent", "fee", "exp", "chg"):
             b[k] = round(b[k], 2)
-        b["net"] = round(b["rent"] - b["fee"] - b["exp"], 2)
+        b["net"] = round(b["rent"] - b["fee"] - b["exp"] + b["chg"], 2)
     return out
 
 
@@ -310,7 +325,8 @@ async def statement(oid: str, month: str, user=Depends(require("owners", "r"))):
         raise HTTPException(403, "You do not have permission for this action")
     rents, exps, calc = await _statement_data(oid, month)
     existing = await db.owner_statements.find_one({"owner_id": oid, "month": month}, {"_id": 0})
-    return {"month": month, "rents": rents, **calc, "expense_items": exps, "settled": existing}
+    return {"month": month, "rents": rents, **calc, "expense_items": exps, "charge_items": await owner_charge_items(oid, month),
+            "settled": existing}
 
 
 @router.post("/owners/{oid}/statement/settle")
@@ -320,9 +336,9 @@ async def settle_statement(oid: str, body: dict, user=Depends(require("leases", 
     if not owner or len(month) != 7:
         raise HTTPException(422, "Owner and month (YYYY-MM) are required")
     rents, exps, calc = await _statement_data(oid, month)
-    if calc["rent_collected"] <= 0:
+    if calc["rent_collected"] <= 0 and calc["charges_collected"] <= 0:
         raise HTTPException(422, "No rent collected for this month")
-    split = await _by_branch(oid, rents, exps)
+    split = await _by_branch(oid, rents, exps, await owner_charge_items(oid, month))
     st = {"id": new_id(), "code": await next_code("statement", "OS-", 5), "owner_id": oid, "owner_name": owner["name"],
           "month": month, **calc, "by_branch": split, "payout_status": "pending_manual_transfer", "by": user["id"],
           "created_at": now_iso()}
@@ -375,6 +391,8 @@ async def statement_pdf_bytes(oid, month):
     rents, exps, calc = await _statement_data(oid, month)
     settled = await db.owner_statements.find_one({"owner_id": oid, "month": month}, {"_id": 0}) or {}
     rows = [[r["date"], r["lease_code"], f"Rent {r['period']}", inr(r["amount"])] for r in rents]
+    chg = await owner_charge_items(oid, month)
+    rows += [[c["date"], c["lease_code"], f"Collected for you: {c['description'].rsplit(' (', 1)[0]}", inr(c["amount"])] for c in chg]
     rows += [["", "", f"Expense: {e['description']}", inr(-e["amount"])] for e in exps]
     meta = [("Owner", owner.get("name", "-")), ("Owner code", owner.get("code", "-")), ("Month", month)]
     if settled:
@@ -383,7 +401,9 @@ async def statement_pdf_bytes(oid, month):
     return make_pdf(f"Owner Statement {month}", await get_settings(), meta,
                     ["Date", "Lease", "Description", "Amount"], rows,
                     [("Rent collected", inr(calc["rent_collected"])), ("Management fee", inr(-calc["management_fee"])),
-                     ("Expenses", inr(-calc["expenses"])), ("Net payable to owner", inr(calc["net_payable"]))],
+                     ("Expenses", inr(-calc["expenses"]))] +
+                    ([("Bills collected for you (EB, water…)", inr(calc["charges_collected"]))] if calc["charges_collected"] else []) +
+                    [("Net payable to owner", inr(calc["net_payable"]))],
                     "Funds are held on behalf of the owner and are not company revenue.")
 
 
@@ -448,6 +468,9 @@ async def update_wo(wid: str, body: dict, user=Depends(require("maintenance", "w
     if upd.get("status") == "completed" and upd["actual_cost"] > 0:
         await post_ledger("company", "out", upd["actual_cost"], "work_order", wid, f"Vendor paid {wo['code']}", user,
                           wo.get("vendor_id"), "expense:maintenance", wo.get("branch_id"))
+    if upd.get("status") == "completed" and wo.get("ticket_id"):
+        from routes_tickets import on_work_order_done
+        await on_work_order_done(wo, user)
     await audit(user, "work_order_updated", "maintenance", wid, upd)
     return {**wo, **upd}
 

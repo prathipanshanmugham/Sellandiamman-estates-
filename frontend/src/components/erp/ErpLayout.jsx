@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Bell, LayoutDashboard, Users, Building2, UserSquare, Handshake, FileText, Wrench, CalendarDays, CalendarRange, Wallet, CheckSquare, FolderLock, BarChart3, Settings, ShieldCheck, ScrollText, Menu, LogOut, Stamp, Newspaper, KeyRound, ExternalLink, X, Gauge, Contact, FileSignature, PiggyBank, Calculator, PanelsTopLeft, Network, MapPinned } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { LayoutDashboard, Users, Building2, UserSquare, Handshake, FileText, Wrench, CalendarDays, CalendarRange, Wallet, CheckSquare, FolderLock, BarChart3, Settings, ShieldCheck, ScrollText, Menu, LogOut, Stamp, Newspaper, KeyRound, ExternalLink, X, Gauge, Contact, FileSignature, PiggyBank, Calculator, PanelsTopLeft, Network, MapPinned, LifeBuoy, LockKeyhole } from "lucide-react";
+import { Notifications } from "../NotificationBell";
 import { useAuth } from "../../lib/auth";
-import { api, fmtDateTime, branchApi, useBranchPick, cachedGet } from "../../lib/api";
+import { branchApi, useBranchPick, cachedGet } from "../../lib/api";
 import { Logo } from "../brand/Logo";
 
 const NAV = [
   ["Work", [["/erp", "Dashboard", LayoutDashboard, "dashboard"], ["/erp/ceo", "CEO dashboard", Gauge, "ceo"], ["/erp/calendar", "Calendar", CalendarRange, null], ["/erp/tasks", "Tasks", CheckSquare, "tasks"], ["/erp/approvals", "Approvals", Stamp, null]]],
   ["Customers & sales", [["/erp/customers", "Customers", Contact, "customers"], ["/erp/leads", "CRM & Leads", Users, "leads"], ["/erp/properties", "Properties", Building2, "properties"], ["/erp/owners", "Owners", UserSquare, "owners"], ["/erp/deals", "Deals", Handshake, "deals"], ["/erp/agreements", "Agreements", FileSignature, "agreements"]]],
-  ["Operations", [["/erp/leases", "Leases & Rent", FileText, "leases"], ["/erp/maintenance", "Maintenance", Wrench, "maintenance"], ["/erp/short-stay", "Short stays", CalendarDays, "shortstay"], ["/erp/documents", "Documents", FolderLock, "documents"]]],
+  ["Operations", [["/erp/leases", "Leases & Rent", FileText, "leases"], ["/erp/tickets", "Service requests", LifeBuoy, "maintenance"], ["/erp/maintenance", "Maintenance", Wrench, "maintenance"], ["/erp/short-stay", "Short stays", CalendarDays, "shortstay"], ["/erp/documents", "Documents", FolderLock, "documents"]]],
   ["Money", [["/erp/finance", "Finance", Wallet, "finance"], ["/erp/investors", "Investors", PiggyBank, "investors"], ["/erp/reports", "Reports", BarChart3, "reports"], ["/erp/tools", "Tools & calculators", Calculator, null]]],
   ["Website", [["/erp/website", "Website editor", PanelsTopLeft, "cms"], ["/erp/insights", "Insights", Newspaper, "cms"]]],
-  ["Team & admin", [["/erp/team", "Team chart", Network, null], ["/erp/places", "Branches & places", MapPinned, "settings|properties"], ["/erp/users", "Users & Roles", ShieldCheck, "users"], ["/erp/settings", "Settings", Settings, "settings|cms"], ["/erp/audit", "Audit Log", ScrollText, "audit"]]],
+  ["Team & admin", [["/erp/team", "Team chart", Network, null], ["/erp/places", "Branches & places", MapPinned, "settings|properties"], ["/erp/users", "Users & Roles", ShieldCheck, "users"], ["/erp/vault", "Password vault", LockKeyhole, "vault"], ["/erp/settings", "Settings", Settings, "settings|cms"], ["/erp/audit", "Audit Log", ScrollText, "audit"]]],
 ];
 
 // Staff who work across branches choose one to narrow every list, total and report; "All" shows everything they may see.
@@ -28,24 +28,6 @@ function BranchPicker({ user, className = "" }) {
       <option value="">{user.all_branches ? "All branches" : "All my branches"}</option>
       {mine.map((b) => <option key={b.id} value={b.id}>{b.name}{b.is_head_office ? " (HO)" : ""}</option>)}
     </select>
-  );
-}
-
-function Notifications() {
-  const [rows, setRows] = useState([]);
-  const load = () => api.get("/notifications").then((r) => setRows(r.data)).catch(() => {});
-  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, []);
-  const unread = rows.filter((r) => !r.read).length;
-  return (
-    <Popover onOpenChange={(o) => { if (!o && unread) api.post("/notifications/read").then(load).catch(() => {}); }}>
-      <PopoverTrigger className="relative p-2 text-slate-600 hover:text-slate-900" data-testid="notifications-btn" aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}><Bell size={18} />{unread > 0 && <span className="absolute right-0 top-0 min-w-[16px] bg-slate-900 px-1 text-[10px] text-white" data-testid="notifications-count">{unread}</span>}</PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] rounded-sm p-0">
-        <div className="max-h-96 overflow-y-auto" data-testid="notifications-list">
-          {rows.length === 0 && <p className="p-4 text-sm text-slate-500">No notifications</p>}
-          {rows.map((n) => <Link to={n.link || "#"} key={n.id} className={`block border-b border-slate-100 p-3 text-sm hover:bg-slate-50 ${n.read ? "" : "bg-slate-50"}`}><p className="font-medium text-slate-800">{n.title}</p>{n.body && <p className="text-xs text-slate-500">{n.body}</p>}<p className="mt-1 text-[10px] text-slate-400">{fmtDateTime(n.created_at)}</p></Link>)}
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
 

@@ -23,3 +23,5 @@ export { default as Tools } from "./Tools";
 export { default as Documents } from "./Documents";
 export { InsightsList, InsightEditor } from "./InsightsAdmin";
 export { Tasks, Approvals, Reports, Users, Settings, Audit } from "./Admin";
+export { Tickets, TicketDesk } from "./Tickets";
+export { default as Vault } from "./Vault";
