@@ -1,24 +1,70 @@
+# Sellandiamman Estates production stack. See DEPLOYMENT.md.
+#   cp .env.example .env && cp backend/.env.example backend/.env   (fill in both)
+#   docker compose up -d --build
 services:
   mongo:
     image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: estates
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}
     volumes: ["mongo_data:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
   backend:
     build: ./backend
+    restart: unless-stopped
     env_file: ./backend/.env
     environment:
-      MONGO_URL: mongodb://mongo:27017
+      MONGO_URL: mongodb://estates:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
       UPLOAD_DIR: /data/uploads
-    volumes: ["uploads:/data/uploads"]
-    depends_on: [mongo]
-  frontend:
-    image: node:20-alpine
-    working_dir: /app
-    volumes: ["./frontend:/app"]
-    command: sh -c "yarn install --frozen-lockfile && yarn build && npx serve -s build -l 3000"
+      SITE_URL: https://${DOMAIN:?Set DOMAIN in .env}
+      CORS_ORIGINS: https://${DOMAIN}
+      COOKIE_SECURE: "true"
+      SITE_SHELL: /shell/index.html
+    volumes: ["uploads:/data/uploads", "site_shell:/shell:ro"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+      args:
+        SITE_URL: https://${DOMAIN}
+        MAP_TILES: ${MAP_TILES:-}
+        MAP_ATTRIBUTION: ${MAP_ATTRIBUTION:-}
+    restart: unless-stopped
     environment:
-      REACT_APP_BACKEND_URL: ${PUBLIC_URL}
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      # own server: the domain (Caddy does HTTPS). Behind nginx on a shared server: ":80" (see DEPLOYMENT.md)
+      SITE_ADDRESS: ${SITE_ADDRESS:-${DOMAIN}}
+    ports: ["${HTTP_BIND:-80}:80", "${HTTPS_BIND:-443}:443", "${HTTPS_BIND:-443}:443/udp"]
+    # share the built index.html with the backend, which adds search-engine text to each page
+    command: ["sh", "-c", "cp /srv/index.html /shell/index.html && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
+    volumes: ["caddy_data:/data", "caddy_config:/config", "site_shell:/shell"]
     depends_on: [backend]
-# Put a reverse proxy (nginx/Caddy) in front: route /api/* -> backend:8001, everything else -> frontend:3000, with HTTPS.
+
+  backup:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_URL: mongodb://estates:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
+      DB_NAME: ${DB_NAME:-sellandiamman_estates}
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+    volumes: ["./backups:/backups", "uploads:/data/uploads:ro", "./scripts:/scripts:ro"]
+    entrypoint: ["bash", "/scripts/backup-loop.sh"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
 volumes:
   mongo_data:
   uploads:
+  caddy_data:
+  caddy_config:
+  site_shell:

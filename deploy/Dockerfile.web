@@ -1,0 +1,16 @@
+# Builds the website + staff app and serves it with Caddy (automatic HTTPS), proxying the API to the backend.
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY frontend/package.json frontend/yarn.lock ./
+RUN yarn install --frozen-lockfile --network-timeout 600000
+COPY frontend/ ./
+ARG SITE_URL
+ARG MAP_TILES=""
+ARG MAP_ATTRIBUTION=""
+ENV REACT_APP_SITE_URL=$SITE_URL REACT_APP_MAP_TILES=$MAP_TILES REACT_APP_MAP_ATTRIBUTION=$MAP_ATTRIBUTION \
+    GENERATE_SOURCEMAP=false CI=false
+RUN yarn build
+
+FROM caddy:2.8-alpine
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/build /srv

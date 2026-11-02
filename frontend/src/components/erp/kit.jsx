@@ -13,9 +13,9 @@ export function PageHeader({ title, sub, children }) {
 }
 
 const TONES = { green: "bg-emerald-50 text-emerald-800 border-emerald-200", amber: "bg-amber-50 text-amber-800 border-amber-200", blue: "bg-blue-50 text-blue-800 border-blue-200", red: "bg-red-50 text-red-800 border-red-200", grey: "bg-slate-50 text-slate-700 border-slate-200" };
-const STATUS_TONE = { published: "green", verified: "green", won: "green", paid: "green", active: "green", completed: "green", closed: "grey", done: "green", approved: "green", settled: "green", verification_pending: "amber", pending: "amber", partially_paid: "amber", negotiation: "blue", agreement: "blue", issued: "blue", confirmed: "blue", in_progress: "blue", checked_in: "blue", lost: "red", cancelled: "red", rejected: "red", disputed: "red", void: "red", urgent: "red", high: "amber", overdue: "red", failed: "red" };
-export function Badge({ v, tone, testid }) {
-  return <span className={`inline-block whitespace-nowrap border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${TONES[tone || STATUS_TONE[v] || "grey"]}`} data-testid={testid}>{label(v)}</span>;
+const STATUS_TONE = { published: "green", verified: "green", won: "green", paid: "green", active: "green", completed: "green", closed: "grey", done: "green", approved: "green", settled: "green", verification_pending: "amber", pending: "amber", partially_paid: "amber", negotiation: "blue", agreement: "blue", issued: "blue", confirmed: "blue", in_progress: "blue", checked_in: "blue", lost: "red", cancelled: "red", rejected: "red", disputed: "red", void: "red", urgent: "red", high: "amber", overdue: "red", failed: "red", requested: "amber", scheduled: "blue", no_show: "red", ready_to_market: "blue", under_offer: "blue", pending_manual_transfer: "amber", due: "amber", visit: "blue", stay: "green", rent: "amber", lease_end: "red", task: "grey", authorisation: "amber", conflict: "red", declined: "grey", draft: "grey", final: "green", open: "blue", funded: "blue", operating: "green", exiting: "amber", exited: "grey", healthy: "green", attention: "amber", critical: "red", needs_details: "amber", verified_kyc: "green", block: "grey", acknowledged: "blue", on_hold: "amber", resolved: "green", partly_paid: "amber", waived: "grey", invited: "amber" };
+export function Badge({ v, tone, testid, text }) {
+  return <span className={`inline-block whitespace-nowrap border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${TONES[tone || STATUS_TONE[v] || "grey"]}`} data-testid={testid}>{text || label(v)}</span>;
 }
 
 export function Kpi({ title, value, hint, testid, onClick }) {
@@ -28,18 +28,18 @@ export function Kpi({ title, value, hint, testid, onClick }) {
   );
 }
 
-export function DataTable({ columns, rows, onRow, testid = "data-table", empty = "No records yet." }) {
+export function DataTable({ columns, rows, onRow, testid = "data-table", empty = "No records yet.", cards = true, loading = false }) {
   return (
     <div className="panel overflow-x-auto" data-testid={testid}>
-      <table className="tbl w-full">
+      <table className={`tbl w-full ${cards ? "tbl-cards" : ""}`}>
         <thead><tr>{columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={r.id || i} onClick={onRow ? () => onRow(r) : undefined} className={onRow ? "cursor-pointer hover:bg-slate-50" : ""} data-testid={`${testid}-row-${i}`}>
-              {columns.map((c) => <td key={c.key}>{c.render ? c.render(r) : r[c.key] ?? "-"}</td>)}
+            <tr key={r.id || i} onClick={onRow ? () => onRow(r) : undefined} onKeyDown={onRow ? (e) => { if (e.key === "Enter") onRow(r); } : undefined} tabIndex={onRow ? 0 : undefined} className={onRow ? "cursor-pointer hover:bg-slate-50 focus:bg-slate-50 focus:outline-none" : ""} data-testid={`${testid}-row-${i}`}>
+              {columns.map((c) => <td key={c.key} data-label={typeof c.label === "string" ? c.label : ""}>{c.render ? c.render(r) : r[c.key] ?? "-"}</td>)}
             </tr>
           ))}
-          {!rows.length && <tr><td colSpan={columns.length} className="py-10 text-center text-slate-400">{empty}</td></tr>}
+          {!rows.length && <tr><td colSpan={columns.length} className="empty-cell py-10 text-center text-slate-400">{loading ? "Loading…" : empty}</td></tr>}
         </tbody>
       </table>
     </div>
@@ -68,7 +68,7 @@ export function Field({ f, value, onChange }) {
   return <div className={f.full ? "sm:col-span-2" : ""}><label className="lbl" htmlFor={id}>{f.label}{f.required && " *"}</label>{el}{f.hint && <p className="mt-1 text-xs text-slate-400">{f.hint}</p>}</div>;
 }
 
-export function FormDialog({ open, onClose, title, fields, initial = {}, onSubmit, submitLabel = "Save", children }) {
+export function FormDialog({ open, onClose, title, fields, initial = {}, onSubmit, submitLabel = "Save", children, wide }) {
   const [v, setV] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -84,10 +84,10 @@ export function FormDialog({ open, onClose, title, fields, initial = {}, onSubmi
     try { await onSubmit(out); onClose(); } catch (ex) { setErr(errMsg(ex)); } finally { setBusy(false); }
   };
   return (
-    <Modal open={open} onClose={onClose} title={title} wide={fields.length > 10}>
+    <Modal open={open} onClose={onClose} title={title} wide={wide ?? fields.length > 10}>
       <form onSubmit={submit} className="space-y-4" data-testid="form-dialog">
         <div className="grid gap-4 sm:grid-cols-2">{fields.map((f) => <Field key={f.name} f={f} value={v[f.name]} onChange={(x) => setV((s) => ({ ...s, [f.name]: x }))} />)}</div>
-        {children && children(v)}
+        {children && children(v, (patch) => setV((s) => ({ ...s, ...patch })))}
         {err && <p className="text-sm text-red-700" role="alert" data-testid="form-error">{err}</p>}
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" className="btn-line" onClick={onClose}>Cancel</button><button className="btn-dark" disabled={busy} data-testid="form-submit-btn">{busy ? "Saving…" : submitLabel}</button></div>
       </form>
@@ -112,6 +112,6 @@ export function Section({ title, children, actions, testid }) {
   return <section className="panel p-5" data-testid={testid}><div className="mb-4 flex items-center justify-between gap-2"><h2 className="font-heading text-base font-semibold">{title}</h2><div className="flex gap-2">{actions}</div></div>{children}</section>;
 }
 
-export function Facts({ items }) {
-  return <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">{items.filter(Boolean).map(([k, v]) => <div key={k}><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt><dd className="mt-0.5 break-words text-sm text-slate-800">{v ?? "-"}</dd></div>)}</dl>;
+export function Facts({ items, cols = "grid-cols-2 sm:grid-cols-3" }) {
+  return <dl className={`grid gap-x-6 gap-y-3 ${cols}`}>{items.filter(Boolean).map(([k, v]) => <div key={k}><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt><dd className="mt-0.5 break-words text-sm text-slate-800">{v ?? "-"}</dd></div>)}</dl>;
 }

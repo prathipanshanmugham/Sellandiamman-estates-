@@ -1,35 +1,42 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, inr, label } from "../../lib/api";
+import { api, inr, label, fmtDateTime } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { Kpi, PageHeader, Section, DataTable } from "../../components/erp/kit";
+import { Kpi, PageHeader, Section, DataTable, act } from "../../components/erp/kit";
 
 const STAGES = ["new", "contacted", "qualified", "requirements", "matched", "site_visit", "negotiation", "won", "lost"];
 
 export default function Dashboard() {
   const nav = useNavigate();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const [r, setR] = useState({ frm: "", to: "" });
   const [d, setD] = useState(null);
-  useEffect(() => { api.get("/dashboard", { params: { frm: r.frm || undefined, to: r.to || undefined } }).then((x) => setD(x.data)); }, [r]);
+  const [visits, setVisits] = useState([]);
+  useEffect(() => { api.get("/dashboard", { params: { frm: r.frm || undefined, to: r.to || undefined } }).then((x) => setD(x.data)).catch(() => setD({})); }, [r]);
+  useEffect(() => { if (can("leads")) api.get("/site-visits").then((x) => setVisits(x.data.filter((v) => v.status === "requested"))).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!d) return <p className="text-sm text-slate-500">Loading dashboard…</p>;
+  if (!d.range && !d.leads && !d.finance) return <p className="text-sm text-slate-500">The dashboard could not be loaded. Refresh to try again.</p>;
   const f = d.finance;
   return (
     <div className="space-y-6" data-testid="dashboard">
       <PageHeader title={`Welcome, ${user.name}`} sub="Business overview. Figures respect your role's access.">
         <input type="date" className="inp !w-auto" value={r.frm} onChange={(e) => setR({ ...r, frm: e.target.value })} data-testid="dash-from" aria-label="From" />
         <input type="date" className="inp !w-auto" value={r.to} onChange={(e) => setR({ ...r, to: e.target.value })} data-testid="dash-to" aria-label="To" />
-        <button className="btn-line btn-sm" onClick={() => api.post("/automations/run")} data-testid="run-reminders-btn">Run reminders</button>
+        <button className="btn-line btn-sm" onClick={async () => { const x = await act(() => api.post("/automations/run")); if (x) act(async () => x, `Checked ${x.data.checked} reminders`); }} data-testid="run-reminders-btn">Check reminders now</button>
       </PageHeader>
       {d.leads && <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
         <Kpi title="New leads" value={d.leads.new} testid="kpi-new-leads" onClick={() => nav("/erp/leads")} />
         <Kpi title="Overdue follow-ups" value={d.leads.awaiting_followup} testid="kpi-overdue" onClick={() => nav("/erp/leads?overdue=1")} />
         <Kpi title="Qualified pipeline" value={d.leads.qualified} testid="kpi-qualified" />
-        <Kpi title="Visits scheduled" value={d.site_visits.scheduled} hint={`${d.site_visits.completed} completed`} testid="kpi-visits" />
+        <Kpi title="Visits scheduled" value={d.site_visits.scheduled} hint={`${d.site_visits.requested} requests waiting · ${d.site_visits.completed} done`} testid="kpi-visits" onClick={() => nav("/erp/calendar")} />
         {d.deals && <Kpi title="Offers / negotiation" value={d.deals.negotiating} testid="kpi-negotiating" onClick={() => nav("/erp/deals")} />}
         {d.deals && <Kpi title="Closed deals" value={d.deals.closed} testid="kpi-closed" />}
       </div>}
+      {visits.length > 0 && <Section title={`Visit requests waiting (${visits.length})`} testid="visit-requests">
+        <ul className="divide-y divide-slate-100">{visits.map((v) => <li key={v.id}><Link to={`/erp/leads/${v.lead_id}`} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm hover:underline"><span><b>{v.lead_name}</b> · {v.property_code} {v.property_title}</span><span className="text-xs text-slate-500">asked for {fmtDateTime(v.scheduled_at)} ({label(v.preferred_slot || "any time")})</span></Link></li>)}</ul>
+        <p className="mt-2 text-xs text-slate-400">Open the lead to confirm a time. The customer booked these on the website.</p>
+      </Section>}
       {f && <Section title="Revenue recognition" testid="revenue-section">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Kpi title="Quoted commission" value={inr(f.quoted_commission, true)} hint="Open deals, no signed agreement" testid="kpi-quoted" />
@@ -50,6 +57,12 @@ export default function Dashboard() {
       {(d.pm || d.shortstay) && <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         {d.pm && <><Kpi title="Active leases" value={d.pm.active_leases} testid="kpi-leases" onClick={() => nav("/erp/leases")} /><Kpi title="Leases expiring (60d)" value={d.pm.expiring_60d} testid="kpi-expiring" /><Kpi title="Vacant rentals" value={d.pm.vacant} testid="kpi-vacant" /><Kpi title="Open work orders" value={d.pm.open_work_orders} testid="kpi-workorders" onClick={() => nav("/erp/maintenance")} /></>}
         {d.shortstay && <><Kpi title="Short-stay bookings" value={d.shortstay.bookings} testid="kpi-bookings" onClick={() => nav("/erp/short-stay")} /><Kpi title="Gross booking value" value={inr(d.shortstay.gross, true)} hint="Not company revenue" testid="kpi-booking-gross" /><Kpi title="Average daily rate" value={inr(d.shortstay.adr, true)} hint={`${d.shortstay.nights} nights`} testid="kpi-adr" /></>}
+      </div>}
+      {d.shortstay && (d.shortstay.conflicts > 0 || d.shortstay.requests > 0 || d.shortstay.needs_details > 0) && <Section title="Short stays need you" testid="stay-alerts-dash"><div className="flex flex-wrap gap-2">{d.shortstay.conflicts > 0 && <Link to="/erp/short-stay" className="chip !border-red-300 !bg-red-50 !text-red-900">{d.shortstay.conflicts} double booking{d.shortstay.conflicts > 1 ? "s" : ""} between platforms</Link>}{d.shortstay.requests > 0 && <Link to="/erp/short-stay" className="chip !border-amber-300 !bg-amber-50 !text-amber-900">{d.shortstay.requests} website stay request{d.shortstay.requests > 1 ? "s" : ""} to confirm</Link>}{d.shortstay.needs_details > 0 && <Link to="/erp/short-stay" className="chip">{d.shortstay.needs_details} platform booking{d.shortstay.needs_details > 1 ? "s" : ""} need guest details</Link>}</div></Section>}
+      {(d.customers || d.investors) && <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {d.customers && <><Kpi title="Customers" value={d.customers.total} testid="kpi-customers" onClick={() => nav("/erp/customers")} /><Kpi title="New customers this month" value={d.customers.new_this_month} /><Kpi title="Agreed to marketing" value={d.customers.with_consent} hint="Only message these with offers" /></>}
+        {d.investors && <><Kpi title="Investor capital" value={inr(d.investors.capital, true)} testid="kpi-investor-capital" onClick={() => nav("/erp/investors")} /><Kpi title="Investors" value={d.investors.investors} hint={`${d.investors.active_investments} active investments`} /></>}
+        {can("ceo") && <Kpi title="Company health score" value="Open" hint="CEO dashboard" onClick={() => nav("/erp/ceo")} testid="kpi-ceo" />}
       </div>}
       <div className="grid gap-6 xl:grid-cols-2">
         {d.leads && <Section title="Lead pipeline"><ResponsiveContainer width="100%" height={240}><BarChart data={STAGES.map((s) => ({ stage: label(s), n: d.leads.by_stage[s] || 0 }))}><CartesianGrid stroke="#f1f5f9" /><XAxis dataKey="stage" tick={{ fontSize: 10 }} interval={0} angle={-20} height={50} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="n" name="Leads" fill="#334155" /></BarChart></ResponsiveContainer></Section>}

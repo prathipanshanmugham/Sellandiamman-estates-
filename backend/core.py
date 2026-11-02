@@ -4,6 +4,7 @@ import asyncio
 import uuid
 import time
 import logging
+from contextvars import ContextVar
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -19,11 +20,22 @@ from pymongo import ReturnDocument  # noqa: E402
 from pymongo.errors import DuplicateKeyError  # noqa: E402
 
 logger = logging.getLogger("sellandiamman")
-client = AsyncIOMotorClient(os.environ["MONGO_URL"], tz_aware=True)
+MONGO_URL = os.environ["MONGO_URL"]
+if MONGO_URL.startswith("mongomock://"):
+    # In-memory database for the automated tests only (requirements-dev.txt). Never use in production.
+    from mongomock_motor import AsyncMongoMockClient  # noqa: E402
+    client = AsyncMongoMockClient(tz_aware=True)
+else:
+    client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
 db = client[os.environ["DB_NAME"]]
 JWT_SECRET = os.environ["JWT_SECRET"]
+if len(JWT_SECRET) < 32:
+    logging.getLogger("sellandiamman").warning("JWT_SECRET is shorter than 32 characters; use a long random value")
 JWT_ALG = "HS256"
 SESSION_HOURS = 12
+BCRYPT_ROUNDS = int(os.environ.get("BCRYPT_ROUNDS", "12"))
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() != "false"
+SITE_URL = os.environ.get("SITE_URL", "").rstrip("/")
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR") or (ROOT / "uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -38,34 +50,59 @@ ROLES = {
     "marketing": "Marketing Staff",
     "shortstay_ops": "Short-Stay Operations",
     "auditor": "Read-Only Auditor",
+    "owner": "Owner / Lessor (portal)",
+    "investor": "Investor (portal)",
+    "tenant": "Tenant (portal)",
+    "buyer": "Buyer / Client (portal)",
 }
-MODULES = ["dashboard", "leads", "properties", "owners", "deals", "finance", "leases", "maintenance",
-           "shortstay", "documents", "tasks", "reports", "cms", "users", "settings", "audit"]
+# Customer sign-ins. Each sees only their own records in their own portal: owner/lessor (/owner), investor (/investor),
+# tenant (/tenant) and buyer (/buyer). Tenant and buyer accounts are tied to a customer record (customer_id).
+PORTAL_ROLES = ("owner", "investor", "tenant", "buyer")
+STAFF_ROLES = [r for r in ROLES if r not in PORTAL_ROLES]
+MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases",
+           "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users",
+           "settings", "audit", "vault"]
 # r=read w=write a=approve e=export p=publish
 PERMS = {
     "super_admin": {m: "rwaep" for m in MODULES},
-    "director": {**{m: "rwae" for m in MODULES}, "users": "r", "settings": "r", "properties": "rwaep", "cms": "rwp"},
-    "branch_manager": {"dashboard": "r", "leads": "rwe", "properties": "rwaep", "owners": "rw", "deals": "rwe",
-                       "finance": "r", "leases": "rw", "maintenance": "rw", "shortstay": "rw", "documents": "rw",
-                       "tasks": "rw", "reports": "re", "cms": "rwp", "users": "r"},
-    "sales_agent": {"dashboard": "r", "leads": "rw", "properties": "rw", "owners": "r", "deals": "rw",
-                    "tasks": "rw", "documents": "rw"},
-    "property_manager": {"dashboard": "r", "properties": "r", "owners": "r", "leases": "rw", "maintenance": "rw",
-                         "documents": "rw", "tasks": "rw"},
-    "accountant": {"dashboard": "r", "finance": "rwe", "deals": "r", "leases": "r", "shortstay": "r", "owners": "r",
-                   "reports": "re", "tasks": "rw", "maintenance": "r"},
-    "marketing": {"dashboard": "r", "properties": "rp", "cms": "rwp", "leads": "r", "tasks": "rw"},
+    "director": {**{m: "rwae" for m in MODULES}, "users": "r", "settings": "r", "properties": "rwaep", "cms": "rwp",
+                 "vault": "rwa"},
+    "branch_manager": {"dashboard": "r", "ceo": "re", "leads": "rwe", "customers": "rwe", "properties": "rwaep",
+                       "owners": "rw", "deals": "rwe", "finance": "r", "leases": "rw", "maintenance": "rw",
+                       "shortstay": "rw", "documents": "rw", "agreements": "rw", "tasks": "rw", "reports": "re",
+                       "cms": "rwp", "users": "r", "vault": "rw"},
+    "sales_agent": {"dashboard": "r", "leads": "rw", "customers": "rw", "properties": "rw", "owners": "r",
+                    "deals": "rw", "tasks": "rw", "documents": "rw", "agreements": "rw", "vault": "r"},
+    "property_manager": {"dashboard": "r", "properties": "r", "owners": "r", "customers": "r", "leases": "rw",
+                         "maintenance": "rw", "documents": "rw", "agreements": "rw", "tasks": "rw", "vault": "r"},
+    "accountant": {"dashboard": "r", "ceo": "re", "finance": "rwe", "deals": "r", "leases": "r", "shortstay": "r",
+                   "owners": "r", "customers": "r", "investors": "rwe", "agreements": "r", "reports": "re",
+                   "tasks": "rw", "maintenance": "r", "vault": "rw"},
+    "marketing": {"dashboard": "r", "properties": "rp", "cms": "rwp", "leads": "r", "tasks": "rw", "vault": "rw"},
     "shortstay_ops": {"dashboard": "r", "shortstay": "rw", "maintenance": "rw", "properties": "r", "tasks": "rw",
-                      "documents": "r"},
-    "auditor": {"dashboard": "r", "leads": "r", "properties": "r", "owners": "r", "deals": "r", "finance": "r",
-                "leases": "r", "maintenance": "r", "shortstay": "r", "reports": "re", "audit": "r"},
+                      "documents": "r", "vault": "rw"},
+    "auditor": {"dashboard": "r", "ceo": "re", "leads": "r", "customers": "r", "properties": "r", "owners": "r",
+                "deals": "r", "finance": "r", "leases": "r", "maintenance": "r", "shortstay": "r", "investors": "r",
+                "agreements": "r", "reports": "re", "audit": "r"},
+    # Customers use their own portals (/api/portal/*, /api/investor/*, /api/tenant/*, /api/buyer/*, /api/my/*),
+    # scoped to their own records. The auditor never sees the password vault.
+    "owner": {},
+    "investor": {},
+    "tenant": {},
+    "buyer": {},
 }
 # Record scope: these roles only see records where field == their user id
 OWN_SCOPE = {
-    "sales_agent": {"leads": "assigned_to", "deals": "assigned_to", "properties": "assigned_agent"},
+    "sales_agent": {"leads": "assigned_to", "deals": "assigned_to", "properties": "assigned_agent", "customers": "rm_id"},
     "property_manager": {"properties": "assigned_manager", "leases": "manager_id"},
 }
-BRANCH_SCOPED = ("leads", "properties", "deals")
+# Modules whose records carry a branch_id. People with branches set on their account see only those branches;
+# super admins and directors see every branch. The branch picker in the staff app narrows any view to one branch.
+BRANCH_SCOPED = ("leads", "customers", "properties", "deals", "leases", "shortstay", "maintenance", "finance",
+                 "agreements", "ceo")
+ALL_BRANCH_ROLES = ("super_admin", "director")
+# Branch chosen in the staff app's picker for this request (header X-Branch); empty = all the person may see.
+REQ_BRANCH: ContextVar = ContextVar("req_branch", default=None)
 
 
 def now():
@@ -95,7 +132,7 @@ async def next_code(name, prefix, width=4):
 
 
 def hash_password(p: str) -> str:
-    return bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(p.encode(), bcrypt.gensalt(BCRYPT_ROUNDS)).decode()
 
 
 def verify_password(p: str, h: str) -> bool:
@@ -126,8 +163,12 @@ _rate: dict = {}
 
 
 def rate_limit(request: Request, key: str, limit: int, window: int):
+    """In-memory limiter (one backend process). Use a shared store such as Redis if you run several."""
     k = f"{key}:{client_ip(request)}"
     t = time.time()
+    if len(_rate) > 20000:  # drop idle keys so memory stays bounded
+        for old in [x for x, v in _rate.items() if not v or v[-1] < t - 3600]:
+            _rate.pop(old, None)
     hits = [h for h in _rate.get(k, []) if h > t - window]
     if len(hits) >= limit:
         raise HTTPException(429, "Too many requests. Please try again later.")
@@ -135,10 +176,42 @@ def rate_limit(request: Request, key: str, limit: int, window: int):
     _rate[k] = hits
 
 
-def public_user(u):
-    return {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": u["role"],
-            "role_label": ROLES.get(u["role"]), "branch_ids": u.get("branch_ids", []), "active": u.get("active"),
-            "phone": u.get("phone"), "permissions": PERMS.get(u["role"], {}), "created_at": u.get("created_at")}
+_settings_cache = {"at": 0.0, "value": None}
+
+
+async def get_settings_cached(max_age=30):
+    if _settings_cache["value"] is None or time.time() - _settings_cache["at"] > max_age:
+        _settings_cache["value"] = await db.settings.find_one({"id": "company"}, {"_id": 0}) or {}
+        _settings_cache["at"] = time.time()
+    return _settings_cache["value"]
+
+
+def clear_settings_cache():
+    _settings_cache["value"] = None
+
+
+def mfa_required_for(user, settings) -> bool:
+    return user.get("role") in (settings.get("mfa_required_roles") or [])
+
+
+PROFILE_FIELDS = ("designation", "department", "reports_to", "whatsapp", "show_in_directory", "joined_on")
+
+
+def public_user(u, settings=None):
+    out = {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": u["role"],
+           "role_label": ROLES.get(u["role"]), "branch_ids": u.get("branch_ids", []), "active": u.get("active"),
+           "phone": u.get("phone"), "permissions": PERMS.get(u["role"], {}), "created_at": u.get("created_at"),
+           "mfa_enabled": bool(u.get("mfa_enabled")), "owner_id": u.get("owner_id"),
+           "investor_id": u.get("investor_id"), "customer_id": u.get("customer_id"), "last_login": u.get("last_login"),
+           "all_branches": u["role"] in ALL_BRANCH_ROLES or not u.get("branch_ids"),
+           **{k: u.get(k) for k in PROFILE_FIELDS}}
+    if settings is not None:
+        out["mfa_setup_required"] = mfa_required_for(u, settings) and not u.get("mfa_enabled")
+    return out
+
+
+# Paths a signed-in user may still call while their role requires 2-step login and they have not set it up.
+MFA_EXEMPT = ("/api/auth/",)
 
 
 async def current_user(request: Request):
@@ -157,10 +230,59 @@ async def current_user(request: Request):
     sess = await db.sessions.find_one({"sid": payload.get("sid"), "revoked": False})
     if not sess or sess["expires_at"] < now():
         raise HTTPException(401, "Session expired or revoked")
-    user = await db.users.find_one({"id": payload.get("sub"), "active": True}, {"_id": 0, "password_hash": 0})
+    user = await db.users.find_one({"id": payload.get("sub"), "active": True},
+                                   {"_id": 0, "password_hash": 0, "mfa_secret": 0, "mfa_pending_secret": 0,
+                                    "mfa_recovery": 0, "photo": 0})
     if not user:
         raise HTTPException(401, "Account not active")
     user["sid"] = sess["sid"]
+    REQ_BRANCH.set((request.headers.get("x-branch") or "").strip()[:40] or None)
+    if not user.get("mfa_enabled") and not request.url.path.startswith(MFA_EXEMPT):
+        if mfa_required_for(user, await get_settings_cached()):
+            raise HTTPException(403, "mfa_setup_required")
+    return user
+
+
+async def staff_user(request: Request):
+    user = await current_user(request)
+    if user["role"] in PORTAL_ROLES:
+        raise HTTPException(403, "This area is for staff accounts")
+    return user
+
+
+async def owner_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "owner" or not user.get("owner_id"):
+        raise HTTPException(403, "This area is for property owners")
+    return user
+
+
+async def tenant_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "tenant" or not user.get("customer_id"):
+        raise HTTPException(403, "This area is for tenants")
+    return user
+
+
+async def buyer_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "buyer" or not user.get("customer_id"):
+        raise HTTPException(403, "This area is for buyers and clients")
+    return user
+
+
+async def portal_user(request: Request):
+    """Any customer sign-in (owner, investor, tenant, buyer)."""
+    user = await current_user(request)
+    if user["role"] not in PORTAL_ROLES:
+        raise HTTPException(403, "This area is for customer accounts")
+    return user
+
+
+async def investor_user(request: Request):
+    user = await current_user(request)
+    if user["role"] != "investor" or not user.get("investor_id"):
+        raise HTTPException(403, "This area is for investors")
     return user
 
 
@@ -177,13 +299,49 @@ def require(module, action):
     return dep
 
 
+def allowed_branches(user):
+    """None = every branch; otherwise the branch ids on the person's account."""
+    if not user or user.get("role") in ALL_BRANCH_ROLES or not user.get("branch_ids"):
+        return None
+    return list(user["branch_ids"])
+
+
+def branch_filter(user, field="branch_id", selected=None):
+    """Mongo filter for the branches this person may see, narrowed to the branch picked in the app (if any)."""
+    allowed = allowed_branches(user)
+    sel = selected if selected is not None else REQ_BRANCH.get()
+    if sel and sel != "all" and (allowed is None or sel in allowed):
+        return {field: sel}
+    if allowed is not None:
+        return {field: {"$in": allowed}}
+    return {}
+
+
+def in_branch(user, branch_id) -> bool:
+    allowed = allowed_branches(user)
+    return allowed is None or branch_id in allowed
+
+
+def check_branch(user, branch_id):
+    if branch_id and not in_branch(user, branch_id):
+        raise HTTPException(403, "You can only work with records of your own branch")
+
+
+def home_branch(user):
+    """Branch for new records made in the 'all branches' view: the picked branch, else the person's first branch."""
+    sel = REQ_BRANCH.get()
+    if sel and sel != "all" and in_branch(user, sel):
+        return sel
+    return (user.get("branch_ids") or [None])[0] if user else None
+
+
 def scope(user, module):
     f = {}
     field = OWN_SCOPE.get(user["role"], {}).get(module)
     if field:
         f[field] = user["id"]
-    if user["role"] == "branch_manager" and user.get("branch_ids") and module in BRANCH_SCOPED:
-        f["branch_id"] = {"$in": user["branch_ids"] + [None]}
+    if module in BRANCH_SCOPED:
+        f.update(branch_filter(user))
     return f
 
 
@@ -205,34 +363,123 @@ async def audit(user, action, entity, entity_id, details=None):
         "details": details or {}, "at": now_iso()})
 
 
+SMTP = {k: os.environ.get(f"SMTP_{k}", "") for k in ("HOST", "PORT", "USER", "PASSWORD", "FROM", "TLS")}
+
+
+def email_configured() -> bool:
+    return bool(SMTP["HOST"] and SMTP["FROM"])
+
+
+def _send_email_sync(to, subject, text, html=None):
+    import smtplib
+    import ssl
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = SMTP["FROM"], to, subject
+    msg.set_content(text)
+    if html:
+        msg.add_alternative(html, subtype="html")
+    port = int(SMTP["PORT"] or 587)
+    ctx = ssl.create_default_context()
+    if port == 465 or SMTP["TLS"].lower() == "ssl":
+        with smtplib.SMTP_SSL(SMTP["HOST"], port, context=ctx, timeout=20) as s:
+            if SMTP["USER"]:
+                s.login(SMTP["USER"], SMTP["PASSWORD"])
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(SMTP["HOST"], port, timeout=20) as s:
+            if SMTP["TLS"].lower() != "none":
+                s.starttls(context=ctx)
+            if SMTP["USER"]:
+                s.login(SMTP["USER"], SMTP["PASSWORD"])
+            s.send_message(msg)
+
+
+async def send_email(to, subject, text, html=None) -> str:
+    """Sends through SMTP when SMTP_HOST/SMTP_FROM are set; otherwise only logs (development)."""
+    if not to:
+        return "skipped"
+    if not email_configured():
+        logger.info("[EMAIL-DEV] to=%s subject=%s\n%s", to, subject, text)
+        return "dev_logged"
+    try:
+        await asyncio.to_thread(_send_email_sync, to, subject, text, html)
+        return "sent"
+    except Exception:
+        logger.exception("Email to %s failed", to)
+        return "failed"
+
+
+def _email_body(title, body, link):
+    url = f"{SITE_URL}{link}" if link and SITE_URL else ""
+    text = f"{title}\n\n{body or ''}\n\n{('Open: ' + url) if url else ''}\n\n— Sellandiamman Estates"
+    return text
+
+
+async def _email_notification(uid, title, body, link, nid):
+    u = await db.users.find_one({"id": uid, "active": True}, {"_id": 0, "email": 1})
+    status = await send_email(u and u.get("email"), title, _email_body(title, body, link))
+    await db.notifications.update_one({"id": nid}, {"$set": {"email_status": status}})
+
+
 async def notify(user_ids, title, body="", link="", dedupe=None, kind="info"):
+    settings = await get_settings_cached()
     for uid in set(filter(None, user_ids)):
         doc = {"id": new_id(), "user_id": uid, "title": title, "body": body, "link": link, "kind": kind,
                "read": False, "created_at": now_iso(), "dedupe_key": f"{dedupe}:{uid}" if dedupe else new_id(),
-               "email_status": "dev_logged"}
+               "email_status": "off"}
         try:
             await db.notifications.insert_one(doc)
-            logger.info("[EMAIL-DEV] to=%s subject=%s", uid, title)
         except DuplicateKeyError:
-            pass
+            continue
+        if settings.get("email_notifications"):
+            asyncio.create_task(_email_notification(uid, title, body, link, doc["id"]))
 
 
 async def notify_roles(roles, title, body="", link="", dedupe=None, kind="info", branch_id=None):
+    """People with branches on their account are told only about their own branches' records."""
     q = {"role": {"$in": roles}, "active": True}
     users = await db.users.find(q, {"_id": 0, "id": 1, "role": 1, "branch_ids": 1}).to_list(500)
-    ids = [u["id"] for u in users if u["role"] != "branch_manager" or not branch_id
-           or not u.get("branch_ids") or branch_id in u["branch_ids"]]
+    ids = [u["id"] for u in users if not branch_id or allowed_branches(u) is None or branch_id in u["branch_ids"]]
     await notify(ids, title, body, link, dedupe, kind)
 
 
-async def post_ledger(ledger, direction, amount, ref_type, ref_id, description, user, party=None, account=None):
+# ---------------- Branches & locations ----------------
+async def head_office_id():
+    b = await db.branches.find_one({"is_head_office": True, "active": {"$ne": False}}, {"_id": 0, "id": 1})
+    if not b:
+        b = await db.branches.find_one({"active": {"$ne": False}}, {"_id": 0, "id": 1}, sort=[("order", 1)])
+    return b["id"] if b else None
+
+
+async def branch_for_place(city=None, locality=None):
+    """Branch that looks after a town / locality: from the locations list, else a branch in that town, else head office."""
+    import re as _re
+    if city:
+        rx = {"$regex": f"^{_re.escape(city.strip())}$", "$options": "i"}
+        if locality:
+            loc = await db.locations.find_one({"kind": "locality", "city": rx, "name": {
+                "$regex": f"^{_re.escape(locality.strip())}$", "$options": "i"}}, {"_id": 0, "branch_id": 1})
+            if loc and loc.get("branch_id"):
+                return loc["branch_id"]
+        c = await db.locations.find_one({"kind": "city", "name": rx}, {"_id": 0, "branch_id": 1})
+        if c and c.get("branch_id"):
+            return c["branch_id"]
+        b = await db.branches.find_one({"city": rx, "active": {"$ne": False}}, {"_id": 0, "id": 1})
+        if b:
+            return b["id"]
+    return await head_office_id()
+
+
+async def post_ledger(ledger, direction, amount, ref_type, ref_id, description, user, party=None, account=None,
+                      branch_id=None):
     amount = round(float(amount), 2)
     if amount <= 0:
         return None
     entry = {"id": new_id(), "code": await next_code("ledger", "LE-", 6), "ledger": ledger, "direction": direction,
              "amount": amount, "account": account or ref_type, "ref_type": ref_type, "ref_id": ref_id,
              "party": party, "description": description, "posted_by": user["id"] if user else None,
-             "posted_at": now_iso(), "reversal_of": None, "reversed": False}
+             "posted_at": now_iso(), "reversal_of": None, "reversed": False, "branch_id": branch_id}
     await db.ledger_entries.insert_one(dict(entry))
     return entry
 
