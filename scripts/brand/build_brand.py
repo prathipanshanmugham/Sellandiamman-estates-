@@ -5,7 +5,7 @@ so all of them draw exactly the same logo:
 
   frontend/src/components/brand/mark.js     vector paths + colours used by <Mark/> and <Logo/>
   backend/brand.py                          the same geometry as polygons for reportlab PDFs
-  frontend/public/favicon.svg|.ico, apple-touch-icon.png, icon-192.png, icon-512.png, icon-maskable-512.png, og-image.jpg
+  frontend/public/favicon.svg|.ico (transparent), apple-touch-icon.png, icon-192.png, icon-512.png, icon-maskable-512.png (on white), og-image.jpg
   frontend/public/brand/*.svg|*.png         mark and lockups for light and dark backgrounds
 
 Run from the repository root:   python scripts/brand/build_brand.py
@@ -33,6 +33,7 @@ COLORS = {
     "light": {"s": "#8A8D92", "a": "#E3161C", "word": "#121315", "sub": "#7A7D82"},
 }
 BLACK = "#0B0B0C"
+WHITE = "#FFFFFF"
 
 
 # ----------------------------------------------------------------------------------------------------------- tracing
@@ -316,16 +317,25 @@ def mark_svg(C, tone, title="Sellandiamman"):
             f'<title>{title}</title>{svg_group(C, lay, tone, with_text=False)}</svg>')
 
 
-def icon_svg(C, size, fill=0.8, radius=0.0, bg=BLACK):
-    """Square icon: the mark on black, fitted to `fill` of the width."""
+def icon_svg(C, size, fill=0.8, radius=0.0, bg=None, tone="light", adaptive=False):
+    """Square icon: the mark centred and fitted to `fill` of the width, on `bg` (None = transparent).
+    adaptive: the mark switches to the on-dark colours when the browser uses a dark theme (SVG favicon only)."""
     k = size * fill / C["mark_w"]
     x = (size - C["mark_w"] * k) / 2
     y = (size - C["mark_h"] * k) / 2
-    col = COLORS["dark"]
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="{size}" height="{size}">'
-            f'<rect width="{size}" height="{size}" rx="{size * radius:.1f}" fill="{bg}"/>'
-            f'<g transform="translate({x:.2f} {y:.2f}) scale({k:.5f})"><path fill="{col["s"]}" d="{path_d(C["mark"]["S"])}"/>'
-            f'<path fill="{col["a"]}" d="{path_d(C["mark"]["A"])}"/></g></svg>')
+    col = COLORS[tone]
+    style = ""
+    if adaptive:
+        d = COLORS["dark"]
+        style = (f'<style>.s{{fill:{col["s"]}}}.a{{fill:{col["a"]}}}'
+                 f'@media (prefers-color-scheme:dark){{.s{{fill:{d["s"]}}}.a{{fill:{d["a"]}}}}}</style>')
+        paint_s, paint_a = 'class="s"', 'class="a"'
+    else:
+        paint_s, paint_a = f'fill="{col["s"]}"', f'fill="{col["a"]}"'
+    back = f'<rect width="{size}" height="{size}" rx="{size * radius:.1f}" fill="{bg}"/>' if bg else ""
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="{size}" height="{size}">{style}{back}'
+            f'<g transform="translate({x:.2f} {y:.2f}) scale({k:.5f})"><path {paint_s} d="{path_d(C["mark"]["S"])}"/>'
+            f'<path {paint_a} d="{path_d(C["mark"]["A"])}"/></g></svg>')
 
 
 def write_js(C, L):
@@ -421,7 +431,8 @@ def main():
     for name, lay in L.items():
         (brand / f"logo-{name}.svg").write_text(svg_doc(C, lay, "light"))
         (brand / f"logo-{name}-on-dark.svg").write_text(svg_doc(C, lay, "dark"))
-    (PUBLIC / "favicon.svg").write_text(icon_svg(C, 64, fill=0.86, radius=0.18))
+    # Browser tab icon: the mark alone on a transparent background (adapts to dark browser themes)
+    (PUBLIC / "favicon.svg").write_text(icon_svg(C, 64, fill=0.98, adaptive=True))
     jobs = []
 
     def sized(svg, w, h):
@@ -431,11 +442,13 @@ def main():
             w = 1200 if name == "horizontal" else 900
             h = round(w * lay["h"] / lay["w"])
             jobs.append((sized(svg_doc(C, lay, tone), w, h), w, h, brand / f"logo-{name}{suffix}.png", True))
-    for size, out, fill, radius in ((180, "apple-touch-icon.png", 0.78, 0), (192, "icon-192.png", 0.8, 0.18),
-                                    (512, "icon-512.png", 0.8, 0.18), (512, "icon-maskable-512.png", 0.66, 0)):
-        jobs.append((icon_svg(C, size, fill, radius), size, size, PUBLIC / out, True))
+    # Home-screen / app icons: the mark on white. iOS rounds the corners itself; the maskable icon keeps the mark
+    # inside the safe circle so Android can cut any shape.
+    for size, out, fill, radius in ((180, "apple-touch-icon.png", 0.74, 0), (192, "icon-192.png", 0.76, 0.22),
+                                    (512, "icon-512.png", 0.76, 0.22), (512, "icon-maskable-512.png", 0.62, 0)):
+        jobs.append((icon_svg(C, size, fill, radius, bg=WHITE), size, size, PUBLIC / out, True))
     for size in (16, 32, 48):
-        jobs.append((icon_svg(C, size, 0.9, 0.18), size, size, brand / f".fav{size}.png", True))
+        jobs.append((icon_svg(C, size, 1.0), size, size, brand / f".fav{size}.png", True))
     jobs.append((og_html(C, L), 1200, 630, PUBLIC / "og-image.jpg", False))
     asyncio.run(render(jobs))
     ims = [Image.open(brand / f".fav{s}.png") for s in (16, 32, 48)]

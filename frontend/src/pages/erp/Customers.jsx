@@ -59,12 +59,12 @@ export function Customers() {
         {can("customers", "e") && <button className="btn-line btn-sm" onClick={() => openFile(`/customers/export.csv${qs ? `?${qs}` : ""}`, { name: "Customers", csv: true })} data-testid="customer-export-btn"><Download size={13} />Export CSV</button>}
         {can("customers", "w") && <button className="btn-dark btn-sm" onClick={() => setOpen("new")} data-testid="new-customer-btn">New customer</button>}
       </PageHeader>
-      <div className="mb-3 flex flex-wrap gap-2" data-testid="customer-type-chips">
+      <div className="chip-row mb-3 flex flex-wrap gap-2" data-testid="customer-type-chips">
         <button className={`chip ${!f.type ? "chip-on" : ""}`} onClick={() => { setPage(1); setF({ ...f, type: "" }); }}>All</button>
         {CTYPES.map((t) => <button key={t} className={`chip ${f.type === t ? "chip-on" : ""}`} onClick={() => { setPage(1); setF({ ...f, type: f.type === t ? "" : t }); }}>{label(t)} <span className={f.type === t ? "text-slate-300" : "text-slate-400"}>{d?.type_counts?.[t] ?? ""}</span></button>)}
       </div>
-      <div className="mb-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-7">
-        <input className="inp lg:col-span-2" placeholder="Search name, mobile, email, code" value={f.q} onChange={set("q")} data-testid="customer-search" aria-label="Search customers" />
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
+        <input className="inp col-span-2 sm:col-span-1 lg:col-span-2" placeholder="Search name, mobile, email, code" value={f.q} onChange={set("q")} data-testid="customer-search" aria-label="Search customers" />
         <select className="inp" value={f.tag} onChange={set("tag")} aria-label="Tag"><option value="">Any tag</option>{(d?.tags || []).map((t) => <option key={t} value={t}>{t}</option>)}</select>
         <input className="inp" placeholder="Town" value={f.city} onChange={set("city")} aria-label="Town" />
         <select className="inp" value={f.consent} onChange={set("consent")} aria-label="Consent" data-testid="customer-consent-filter"><option value="">Any consent</option><option value="marketing">Agreed to marketing</option><option value="whatsapp">Agreed to WhatsApp</option><option value="none">No marketing consent</option></select>
@@ -72,13 +72,13 @@ export function Customers() {
         <select className="inp" value={f.inactive_days} onChange={set("inactive_days")} aria-label="Activity"><option value="">Any activity</option><option value="90">Quiet 90+ days</option><option value="180">Quiet 6+ months</option><option value="365">Quiet 1+ year</option></select>
       </div>
       <DataTable testid="customers-table" loading={!d} rows={d?.items || []} onRow={(r) => nav(`/erp/customers/${r.id}`)} columns={[
-        { key: "code", label: "Code" },
-        { key: "name", label: "Name", render: (c) => <><span className="font-medium text-slate-900">{c.name}</span>{c.organization && <span className="block text-xs text-slate-500">{c.organization}</span>}{c.anonymised && <span className="block text-xs text-red-700">Personal data removed</span>}</> },
+        { key: "code", label: "Code", m: "top" },
+        { key: "name", label: "Name", m: "title", render: (c) => <><span className="font-medium text-slate-900">{c.name}</span>{c.organization && <span className="block text-xs text-slate-500">{c.organization}</span>}{c.anonymised && <span className="block text-xs text-red-700">Personal data removed</span>}</> },
         { key: "phone", label: "Mobile" },
-        { key: "types", label: "Type", render: (c) => <span className="flex flex-wrap gap-1">{(c.types || []).map((t) => <Badge key={t} v={t} tone="grey" />)}</span> },
+        { key: "types", label: "Type", m: "wide", render: (c) => <span className="flex flex-wrap gap-1">{(c.types || []).map((t) => <Badge key={t} v={t} tone="grey" />)}</span> },
         { key: "city", label: "Town", render: (c) => c.city || "-" },
         { key: "tags", label: "Tags", render: (c) => (c.tags || []).join(", ") || "-" },
-        { key: "consent", label: "Marketing", render: (c) => (c.consent?.marketing ? "Yes" : "No") },
+        { key: "consent", label: "Marketing", m: "hide", render: (c) => (c.consent?.marketing ? "Yes" : "No") },
         { key: "last_activity_at", label: "Last activity", render: (c) => fmtDate(c.last_activity_at) },
       ]} empty="No customers match." />
       {pages > 1 && <nav className="mt-4 flex flex-wrap items-center gap-2 text-sm" aria-label="Pages"><button className="btn-line btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button><span className="text-slate-500">Page {page} of {pages} · {d.total} customers</span><button className="btn-line btn-sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</button></nav>}

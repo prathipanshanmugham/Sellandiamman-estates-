@@ -63,7 +63,7 @@ export default function Leads() {
         {can("leads", "e") && can("leads", "w") && <label className="btn-line btn-sm cursor-pointer">Import CSV<input type="file" accept=".csv" className="hidden" onChange={importCsv} data-testid="import-leads-input" /></label>}
         {can("leads", "w") && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-lead-btn">New lead</button>}
       </PageHeader>
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="filter-bar mb-4 flex flex-wrap gap-2">
         <input className="inp sm:!w-56" placeholder="Search name, phone, code" value={flt.q} onChange={(e) => setFlt({ ...flt, q: e.target.value })} data-testid="lead-search-input" />
         <select className="inp !w-auto" value={flt.stage} onChange={(e) => setFlt({ ...flt, stage: e.target.value })} data-testid="lead-stage-filter"><option value="">All stages</option>{STAGES.map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
         <select className="inp !w-auto" value={flt.source} onChange={(e) => setFlt({ ...flt, source: e.target.value })} data-testid="lead-source-filter"><option value="">All sources</option>{SOURCES.map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
@@ -71,9 +71,9 @@ export default function Leads() {
       </div>
       {view === "pipeline" ? <Pipeline rows={rows} onMove={move} onOpen={(r) => nav(`/erp/leads/${r.id}`)} /> :
         <DataTable testid="leads-table" onRow={(r) => nav(`/erp/leads/${r.id}`)} rows={rows} columns={[
-          { key: "code", label: "Code" }, { key: "name", label: "Name" }, { key: "phone", label: "Phone" },
+          { key: "code", label: "Code", m: "top" }, { key: "name", label: "Name", m: "title" }, { key: "phone", label: "Phone" },
           { key: "interest", label: "Interest", render: (r) => label(r.interest) }, { key: "source", label: "Source", render: (r) => label(r.source) },
-          { key: "stage", label: "Stage", render: (r) => <Badge v={r.stage} /> },
+          { key: "stage", label: "Stage", m: "badge", render: (r) => <Badge v={r.stage} /> },
           { key: "assigned_to", label: "Owner", render: (r) => users.find((u) => u.id === r.assigned_to)?.name || <span className="text-amber-700">Unassigned</span> },
           { key: "next_follow_up", label: "Next follow-up", render: (r) => r.next_follow_up ? <span className={r.next_follow_up < now && !["won", "lost"].includes(r.stage) ? "font-semibold text-red-700" : ""}>{fmtDateTime(r.next_follow_up)}</span> : "-" },
         ]} />}

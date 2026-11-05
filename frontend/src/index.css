@@ -68,19 +68,48 @@
   .prose-article blockquote { @apply my-6 border-l-2 border-slate-900 pl-4 text-slate-600; }
 }
 
-/* Phone layout for data tables: each row becomes a card with label / value pairs. */
+/* Phone layout for data tables: each row becomes a compact card. Fields sit two to a row with the label above the
+   value. Columns can opt into a role with `m` (see DataTable): "top" (small reference line), "badge" (status, top
+   right), "title" (bold headline, full width), "wide" (full width field), "hide" (not shown on phones). */
 @media (max-width: 767px) {
   .tbl-cards thead { display: none; }
-  .tbl-cards, .tbl-cards tbody, .tbl-cards tr, .tbl-cards td { display: block; width: 100%; }
-  .tbl-cards tr { border-bottom: 1px solid #e2e8f0; padding: 10px 12px; }
+  .tbl-cards, .tbl-cards tbody { display: block; width: 100%; }
+  .tbl-cards tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 14px; border-bottom: 1px solid #e2e8f0; padding: 14px; }
   .tbl-cards tr:last-child { border-bottom: 0; }
-  .tbl-cards td { display: grid; grid-template-columns: minmax(96px, 38%) 1fr; gap: 10px; border: 0 !important; padding: 3px 0 !important; overflow-wrap: anywhere; }
-  .tbl-cards td::before { content: attr(data-label); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #64748b; padding-top: 2px; }
+  .tbl-cards td { display: block; min-width: 0; border: 0 !important; padding: 0 !important; font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+  .tbl-cards td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: #94a3b8; }
   .tbl-cards td[data-label=""]::before { content: none; }
-  .tbl-cards td[data-label=""] { grid-template-columns: 1fr; }
-  .tbl-cards td.empty-cell { display: block; text-align: center; }
+  .tbl-cards td[data-label=""] { grid-column: 1 / -1; }
+  .tbl-cards td[data-m="top"] { order: -3; grid-column: 1; align-self: center; font-size: 12px; color: #64748b; }
+  .tbl-cards td[data-m="badge"] { order: -3; grid-column: 2; justify-self: end; align-self: center; }
+  .tbl-cards td[data-m="title"] { order: -2; grid-column: 1 / -1; margin-top: -4px; font-size: 15px; font-weight: 600; color: #0f172a; }
+  .tbl-cards td[data-m="wide"] { grid-column: 1 / -1; }
+  .tbl-cards td[data-m="top"]::before, .tbl-cards td[data-m="badge"]::before, .tbl-cards td[data-m="title"]::before { content: none; }
+  .tbl-cards td[data-m="hide"] { display: none; }
+  .tbl-cards td[data-m="title"] .text-xs, .tbl-cards td[data-m="title"] .block { font-weight: 400; }
+  .tbl-cards td.empty-cell { grid-column: 1 / -1; text-align: center; }
   .tbl-cards td.empty-cell::before { content: none; }
+  .tbl-cards tr:has(> td.empty-cell) { display: block; }
 }
+
+/* Phones: filter rows become a tidy two-column grid (search and checkboxes take the full width) */
+@media (max-width: 639px) {
+  .filter-bar { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .filter-bar > * { width: 100% !important; min-width: 0; max-width: none !important; }
+  .filter-bar > input:not([type=checkbox]):not([type=date]), .filter-bar > label, .filter-bar > .fb-full { grid-column: 1 / -1; }
+  .filter-bar > label:not(.lbl):not([class*=btn]) { padding: 2px 0; }
+  /* chips and tabs scroll sideways in one line instead of wrapping into several */
+  .chip-row { flex-wrap: nowrap !important; overflow-x: auto; margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+  .chip-row > *, .chip-row > .contents > * { flex-shrink: 0; white-space: nowrap; }
+}
+.chip-row::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* Room for the phone tab bar and the iPhone home indicator */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+@media (max-width: 639px) { body[data-tabbar] .demo-pill { bottom: calc(68px + env(safe-area-inset-bottom)) !important; } }
+/* Property page on phones: the price / enquire bar is fixed at the bottom, so the page footer and floating buttons sit above it */
+@media (max-width: 1023px) { body[data-ctabar] footer { padding-bottom: 76px; } body[data-ctabar] .demo-pill { bottom: calc(84px + env(safe-area-inset-bottom)) !important; } body[data-ctabar] [data-testid=whatsapp-float-btn] { display: none; } }
 
 .fade-up { animation: fadeUp 0.5s ease-out both; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -88,6 +117,7 @@
 /* Leaflet map: keep controls under the sticky header */
 .leaflet-container { font: inherit; background: #eef1f4; }
 .leaflet-pane, .leaflet-top, .leaflet-bottom { z-index: 1 !important; }
+.leaflet-container .leaflet-control-attribution { font-size: 10px; line-height: 1.4; }
 .map-pin { background: #0f172a; color: #fff; font: 600 11px/1 "Plus Jakarta Sans", sans-serif; padding: 6px 8px; white-space: nowrap; box-shadow: 0 2px 6px rgba(15, 23, 42, .25); transform: translate(-50%, -100%); position: relative; }
 .map-pin::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-top-color: #0f172a; border-bottom: 0; }
 .map-pin.on { background: #96979b; }

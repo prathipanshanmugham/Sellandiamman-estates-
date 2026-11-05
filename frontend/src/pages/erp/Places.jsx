@@ -47,13 +47,13 @@ export default function Places() {
       </PageHeader>
       <Section title="Branches" testid="branches-section">
         <DataTable testid="branches-table" loading={!branches} rows={branches || []} columns={[
-          { key: "name", label: "Branch", render: (b) => <><span className="font-medium">{b.name}</span> <span className="text-xs text-slate-400">{b.code}</span>{b.is_head_office && <span className="ml-2"><Badge v="head office" tone="blue" /></span>}</> },
+          { key: "name", label: "Branch", m: "title", render: (b) => <><span className="font-medium">{b.name}</span> <span className="text-xs text-slate-400">{b.code}</span>{b.is_head_office && <span className="ml-2"><Badge v="head office" tone="blue" /></span>}</> },
           { key: "city", label: "Town", render: (b) => `${b.city}${b.district ? `, ${b.district}` : ""}` },
-          { key: "address", label: "Address", render: (b) => <span className={b.address?.startsWith("[") ? "text-amber-700" : ""}>{b.address || "-"}</span> },
+          { key: "address", label: "Address", m: "wide", render: (b) => <span className={b.address?.startsWith("[") ? "text-amber-700" : ""}>{b.address || "-"}</span> },
           { key: "manager_id", label: "Manager", render: (b) => users.find((u) => u.id === b.manager_id)?.name || "-" },
           { key: "staff", label: "Staff" }, { key: "properties", label: "Properties" },
           { key: "map", label: "Map", render: (b) => (b.lat ? <a className="underline" href={mapsUrl(b.lat, b.lng)} target="_blank" rel="noopener noreferrer">Pin set</a> : <span className="text-amber-700">No pin</span>) },
-          { key: "active", label: "Status", render: (b) => <Badge v={b.active === false ? "closed" : "open"} tone={b.active === false ? "grey" : "green"} /> },
+          { key: "active", label: "Status", m: "badge", render: (b) => <Badge v={b.active === false ? "closed" : "open"} tone={b.active === false ? "grey" : "green"} /> },
           { key: "x", label: "", render: (b) => sw && <button className="btn-line btn-sm" onClick={() => setDlg({ kind: "branch", id: b.id, v: { ...b, active: b.active !== false } })} data-testid={`edit-branch-${b.id}`}><Pencil size={12} />Edit</button> },
         ]} />
         <p className="mt-3 text-xs text-slate-400">Addresses in [brackets] are placeholders: replace them before going live. Staff are given branches under Users & Roles.</p>

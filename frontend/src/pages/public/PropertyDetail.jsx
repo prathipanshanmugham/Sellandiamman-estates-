@@ -43,6 +43,7 @@ export default function PropertyDetail() {
     offers: p.price && !p.price_on_request ? { "@type": "Offer", price: p.price, priceCurrency: "INR", availability: "https://schema.org/InStock", businessFunction: p.transaction === "sale" ? "http://purl.org/goodrelations/v1#Sell" : "http://purl.org/goodrelations/v1#LeaseOut" } : undefined,
     address: { "@type": "PostalAddress", addressLocality: p.locality, addressRegion: "Tamil Nadu", postalCode: p.pincode, addressCountry: "IN" },
   }), [p]);
+  useEffect(() => { document.body.dataset.ctabar = "1"; return () => { delete document.body.dataset.ctabar; }; }, []);
   useMeta({ title: p ? `${p.title}, ${p.locality}` : "Property", description: p ? `${priceLabel(p)} · ${txLabel(p.transaction)} · ${p.locality}, ${p.city}. ${(p.description_public || "").slice(0, 120)}` : undefined, image: p?.images?.[0], jsonLd: ld });
   if (err) return <div className="container-x py-24" data-testid="property-not-found"><h1 className="font-heading text-2xl">Listing not available</h1><p className="mt-2 text-sm text-slate-500">This property may have been rented, sold or withdrawn.</p><Link to="/properties" className="btn-dark mt-6">Browse properties</Link></div>;
   if (!p) return <div className="container-x py-24 text-sm text-slate-500">Loading…</div>;
@@ -57,14 +58,20 @@ export default function PropertyDetail() {
     : <EnquiryForm key="enq" listingId={p.listing_id} defaultInterest={p.transaction === "sale" ? "buy" : p.transaction} title="" testid="property-enquiry" />;
   return (
     <div className="container-x py-8 sm:py-10" data-testid="property-detail">
+      {/* phones: price and the main action stay in reach at the bottom of the screen */}
+      <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t border-slate-200 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] backdrop-blur lg:hidden" data-testid="property-cta-bar">
+        <div className="min-w-0 flex-1"><p className="truncate font-heading text-lg font-semibold leading-tight">{priceLabel(p)}</p><p className="truncate text-xs text-slate-500">{p.listing_id} · {p.locality}</p></div>
+        {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-line !px-3" aria-label="Ask on WhatsApp"><MessageCircle size={18} /></a>}
+        <button type="button" className="btn-dark" onClick={() => { setTab(stay ? "stay" : "enquire"); document.getElementById("property-form")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} data-testid="property-cta-enquire">{stay ? "Check dates" : "Enquire"}</button>
+      </div>
       <nav className="text-xs text-slate-500" aria-label="Breadcrumb"><Link to="/properties" className="hover:underline">Properties</Link> / <Link to={placeUrl(p.city)} className="hover:underline">{p.city}</Link> / <Link to={placeUrl(p.city, p.locality)} className="hover:underline">{p.locality}</Link> / {p.listing_id}</nav>
       <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0"><p className="eyebrow">{txLabel(p.transaction)} · {label(p.category)}</p><h1 className="mt-1 font-heading text-3xl font-semibold sm:text-4xl" data-testid="property-title">{p.title}</h1><p className="mt-2 flex items-center gap-1 text-sm text-slate-600"><MapPin size={14} />{p.locality}, {p.city}</p></div>
         <div className="text-right"><p className="font-heading text-3xl font-semibold" data-testid="property-price">{priceLabel(p)}</p>{perUnit && <p className="text-xs text-slate-500">{perUnit}</p>}</div>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="chip-row mt-4 flex flex-wrap items-center gap-2">
         <SaveButton id={p.listing_id} withText className="btn-line btn-sm" />
-        <ShareBar url={shareUrl("p", p.listing_id)} text={`${p.title} – ${priceLabel(p)} (${p.locality}, ${p.city})`} brochurePath={`/public/properties/${p.listing_id}/brochure.pdf`} brochureName={`${p.listing_id} brochure`} testid="property-share" />
+        <ShareBar className="contents" url={shareUrl("p", p.listing_id)} text={`${p.title} – ${priceLabel(p)} (${p.locality}, ${p.city})`} brochurePath={`/public/properties/${p.listing_id}/brochure.pdf`} brochureName={`${p.listing_id} brochure`} testid="property-share" />
       </div>
       <div className="mt-6 grid gap-10 lg:grid-cols-[1.6fr_1fr]">
         <div className="min-w-0">
@@ -77,7 +84,7 @@ export default function PropertyDetail() {
           {p.public_lat && p.public_lng && <section className="mt-10"><h2 className="font-heading text-xl font-semibold">Approximate location</h2><p className="mt-1 text-xs text-slate-500">The exact address is shared after you enquire.</p><div className="mt-4"><PropertyMap items={[p]} height={300} /></div></section>}
           <p className="mt-10 text-xs text-slate-400">Details are provided by the owner and subject to verification by the buyer or tenant. <Link to="/legal/disclaimer" className="underline">Listing disclaimer</Link>.</p>
         </div>
-        <aside className="lg:sticky lg:top-24 lg:self-start">
+        <aside id="property-form" className="scroll-mt-20 lg:sticky lg:top-24 lg:self-start">
           <div className="border border-slate-200">
             <div className="grid grid-cols-2 border-b border-slate-200" role="tablist">
               {(stay ? [["stay", "Check dates"], ["enquire", "Ask a question"]] : [["enquire", "Enquire"], ["visit", "Book a site visit"]]).map(([k, l]) => <button key={k} role="tab" aria-selected={t === k} onClick={() => setTab(k)} className={`px-4 py-3 text-sm font-medium ${t === k ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`} data-testid={`property-tab-${k}`}>{l}</button>)}

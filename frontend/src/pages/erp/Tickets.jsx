@@ -35,18 +35,18 @@ export function Tickets() {
         <Kpi title="Past due" value={stats.overdue} hint="Past the fix-by target" testid="tk-kpi-overdue" />
         <Kpi title="Customer rating" value={stats.avg_rating ? `${stats.avg_rating} / 5` : "-"} hint={`${stats.rated} rated`} />
       </div>}
-      <div className="mb-4 flex flex-wrap items-end gap-2">
+      <div className="filter-bar mb-4 flex flex-wrap items-end gap-2">
         <select className="inp sm:!w-auto" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} aria-label="Status" data-testid="tk-filter-status"><option value="active">Open (all active)</option><option value="all">Everything</option>{["open", "acknowledged", "in_progress", "on_hold", "resolved", "closed", "cancelled"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
         <select className="inp sm:!w-auto sm:max-w-xs" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} aria-label="Type"><option value="">All types</option>{cats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
         <input className="inp sm:!w-48" placeholder="Search" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} aria-label="Search" />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.mine} onChange={(e) => setF({ ...f, mine: e.target.checked })} />Assigned to me</label>
       </div>
       <DataTable testid="tickets-table" loading={loading} rows={rows} onRow={(r) => nav(`/erp/tickets/${r.id}`)} empty="No requests here." columns={[
-        { key: "code", label: "Ref", render: (r) => <span className="whitespace-nowrap">{r.unread_staff && <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-red-600 align-middle" aria-label="Unread" />}{r.code}</span> },
-        { key: "title", label: "Request", render: (r) => <>{r.title}<span className="block text-xs text-slate-500">{r.category_label} · {ROLE_TEXT[r.raised_by?.role] || ""} {r.raised_by?.name}</span></> },
+        { key: "code", label: "Ref", m: "top", render: (r) => <span className="whitespace-nowrap">{r.unread_staff && <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-red-600 align-middle" aria-label="Unread" />}{r.code}</span> },
+        { key: "title", label: "Request", m: "title", render: (r) => <>{r.title}<span className="block text-xs text-slate-500">{r.category_label} · {ROLE_TEXT[r.raised_by?.role] || ""} {r.raised_by?.name}</span></> },
         { key: "property_title", label: "Property", render: (r) => r.property_title || "-" },
         { key: "priority", label: "Priority", render: (r) => <Badge v={r.priority} /> },
-        { key: "status", label: "Status", render: (r) => <><TicketBadge status={r.status} staff />{r.overdue && <span className="ml-1 text-[11px] font-semibold text-red-700">LATE</span>}</> },
+        { key: "status", label: "Status", m: "badge", render: (r) => <><TicketBadge status={r.status} staff />{r.overdue && <span className="ml-1 text-[11px] font-semibold text-red-700">LATE</span>}</> },
         { key: "assigned_name", label: "With", render: (r) => r.assigned_name || <span className="text-amber-700">Unassigned</span> },
         { key: "last_message_at", label: "Updated", render: (r) => fmtDateTime(r.last_message_at) }]} />
       <FormDialog open={open} onClose={() => setOpen(false)} title="Log a request for a customer" wide initial={{ priority: "medium", channel: "phone" }}

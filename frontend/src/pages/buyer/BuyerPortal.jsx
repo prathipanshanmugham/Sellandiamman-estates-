@@ -86,7 +86,7 @@ export function BuyerDocuments() {
   return (
     <div className="space-y-6">
       <h1 className="font-heading text-2xl font-semibold">Documents</h1>
-      <DataTable testid="buyer-documents" rows={rows} empty="Documents for your purchase (agreement drafts, title papers, receipts) appear here when your relationship manager shares them." columns={[{ key: "original_name", label: "Document" }, { key: "doc_type", label: "Type", render: (x) => label(x.doc_type) }, { key: "created_at", label: "Added", render: (x) => fmtDate(x.created_at) }, { key: "x", label: "", render: (x) => <button className="btn-line btn-sm" onClick={() => open(x)}>Open</button> }]} />
+      <DataTable testid="buyer-documents" rows={rows} empty="Documents for your purchase (agreement drafts, title papers, receipts) appear here when your relationship manager shares them." columns={[{ key: "original_name", label: "Document", m: "title" }, { key: "doc_type", label: "Type", render: (x) => label(x.doc_type) }, { key: "created_at", label: "Added", render: (x) => fmtDate(x.created_at) }, { key: "x", label: "", render: (x) => <button className="btn-line btn-sm" onClick={() => open(x)}>Open</button> }]} />
     </div>
   );
 }

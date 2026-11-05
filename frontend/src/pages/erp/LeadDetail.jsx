@@ -86,9 +86,9 @@ export default function LeadDetail() {
           {can("properties") && !l.anonymised && <Matches lead={l} onShared={load} />}
           <Section title="Site visits" testid="site-visits-section">
             <DataTable testid="visits-table" rows={l.site_visits} columns={[
-              { key: "property_code", label: "Property", render: (v) => `${v.property_code} · ${v.property_title}` },
+              { key: "property_code", label: "Property", m: "title", render: (v) => `${v.property_code} · ${v.property_title}` },
               { key: "scheduled_at", label: "When", render: (v) => <>{fmtDateTime(v.scheduled_at)}{v.status === "requested" && <span className="block text-xs text-slate-500">asked for {label(v.preferred_slot || "any time")}</span>}</> },
-              { key: "status", label: "Status", render: (v) => <Badge v={v.status} /> },
+              { key: "status", label: "Status", m: "badge", render: (v) => <Badge v={v.status} /> },
               { key: "a", label: "", render: (v) => w && v.status === "requested" ? <span className="flex flex-wrap gap-1"><button className="btn-dark btn-sm" onClick={() => setVisit(v)} data-testid={`confirm-visit-${v.id}`}>Confirm time</button><button className="btn-line btn-sm" onClick={() => setVisitStatus(v, "cancelled", "Request declined")}>Decline</button></span>
                 : w && v.status === "scheduled" ? <span className="flex flex-wrap gap-1"><button className="btn-line btn-sm" onClick={() => completeVisit(v)} data-testid={`complete-visit-${v.id}`}>Completed</button><button className="btn-line btn-sm" onClick={() => setVisitStatus(v, "no_show", "Marked as no-show")}>No-show</button><button className="btn-line btn-sm" onClick={() => setVisitStatus(v, "cancelled", "Visit cancelled")}>Cancel</button></span> : v.feedback || "" },
             ]} empty="No visits yet." />

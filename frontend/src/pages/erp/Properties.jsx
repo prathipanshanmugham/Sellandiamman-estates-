@@ -72,17 +72,17 @@ export default function Properties() {
       <PageHeader title="Property register" sub="Third-party owned unless marked company-owned. Publishing requires verification and authorisation.">
         {can("properties", "w") && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-property-btn">New property</button>}
       </PageHeader>
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="filter-bar mb-4 flex flex-wrap gap-2">
         <input className="inp sm:!w-56" placeholder="Search title, code, locality" value={flt.q} onChange={(e) => setFlt({ ...flt, q: e.target.value })} data-testid="property-search-input" />
         <select className="inp !w-auto" value={flt.status} onChange={(e) => setFlt({ ...flt, status: e.target.value })} data-testid="property-status-filter"><option value="">All statuses</option>{PSTATUS.map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
         <select className="inp !w-auto" value={flt.transaction} onChange={(e) => setFlt({ ...flt, transaction: e.target.value })} data-testid="property-tx-filter"><option value="">All transactions</option>{["sale", "rent", "lease", "short_stay"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
       </div>
       <DataTable testid="properties-table" rows={rows} onRow={(r) => nav(`/erp/properties/${r.id}`)} columns={[
-        { key: "code", label: "Code" }, { key: "listing_id", label: "Listing" }, { key: "title", label: "Title" },
+        { key: "code", label: "Code", m: "top" }, { key: "listing_id", label: "Listing", m: "hide" }, { key: "title", label: "Title", m: "title" },
         { key: "category", label: "Type", render: (r) => `${label(r.category)} · ${label(r.transaction)}` },
         { key: "locality", label: "Location", render: (r) => `${r.locality}, ${r.city}` }, { key: "branch_id", label: "Branch", render: (r) => branches.find((b) => b.id === r.branch_id)?.name || "-" }, { key: "price", label: "Price", render: (r) => priceLabel(r) },
         { key: "ownership_type", label: "Ownership", render: (r) => label(r.ownership_type) },
-        { key: "status", label: "Status", render: (r) => <Badge v={r.status} /> },
+        { key: "status", label: "Status", m: "badge", render: (r) => <Badge v={r.status} /> },
       ]} />
       <FormDialog open={open} onClose={() => setOpen(false)} title="New property" wide fields={propFields(can("owners") ? owners : [], users, branches)} initial={{ transaction: "sale", category: "residential", ownership_type: "third_party", service_type: "brokerage", price_unit: "total", area_unit: "sq.ft", city: "", locality: "", location_public: "approximate" }}
         onSubmit={async (v) => {

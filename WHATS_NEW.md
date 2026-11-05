@@ -1,3 +1,27 @@
+# What's new – Round 5 (5 Nov 2026)
+
+## Cleaner on phones
+- **Lists in the staff app** (leads, properties, customers, leases, invoices, service requests, deals, investors,
+  users and the rest) show each record as a compact card: reference and status chip on top, the name or title in
+  bold, then the other details two to a row. Less important columns are left out on phones.
+- **Page headers**: shorter titles, one row of buttons that scrolls sideways with the main action first.
+- **Filters** sit two to a row; type chips and tabs (Finance, Short stays, Website editor…) stay on one line and
+  scroll sideways instead of wrapping into several rows.
+- Smaller figure cards, dialogs with a margin and a larger close button, Cancel / Save side by side, a compact
+  From – To date picker on the dashboard and reports, bigger tap targets for copy / show / call icons.
+- **Customer portals** (tenant, owner, buyer, investor) have an app-style tab bar at the bottom of the screen
+  (four sections plus "More" for owners).
+- **Property pages** keep the price and an **Enquire** button (and WhatsApp) fixed at the bottom of the screen;
+  share buttons sit on one line.
+- **Website footer** is shorter: services and company links side by side, horizontal logo.
+- Tenant bills line up the same way on every row; the map credit line is small again.
+
+## Icons
+- The browser-tab icon (favicon) is the SA mark on a **transparent** background (it switches to the brighter colours
+  when the browser uses a dark theme).
+- The **app icons** (iPhone / Android home screen, installed app) are the SA mark on **white**.
+- Icon links carry `?v=2`, so browsers pick up the new icons straight away.
+
 # What's new – Round 4 (21 Oct 2026)
 
 ## New logo, everywhere

@@ -94,7 +94,7 @@ function Switcher() {
     } catch (e) { setErr(errMsg(e)); }
   };
   return (
-    <div className="fixed bottom-[max(12px,env(safe-area-inset-bottom,0px))] left-[max(12px,env(safe-area-inset-left,0px))] z-[60] flex flex-col items-start lg:left-auto lg:right-[max(16px,env(safe-area-inset-right,0px))] lg:items-end">
+    <div className="demo-pill fixed bottom-[max(12px,env(safe-area-inset-bottom,0px))] left-[max(12px,env(safe-area-inset-left,0px))] z-[60] flex flex-col items-start lg:left-auto lg:right-[max(16px,env(safe-area-inset-right,0px))] lg:items-end">
       {open && (
         <div className="mb-2 w-[min(20rem,calc(100vw-24px))] border border-slate-300 bg-white p-4 shadow-xl" data-testid="demo-switcher">
           <div className="flex items-start justify-between gap-2"><p className="font-heading text-sm font-semibold">Preview with sample data</p><button onClick={() => setOpen(false)} aria-label="Close" className="text-slate-500"><X size={16} /></button></div>

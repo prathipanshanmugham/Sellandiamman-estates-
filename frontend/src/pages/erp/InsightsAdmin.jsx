@@ -19,8 +19,8 @@ export function InsightsList() {
     <div>
       <PageHeader title="Insights" sub="Market updates and guides shown on the website. Drafts stay private until published.">{can("cms", "w") && <button className="btn-dark btn-sm" onClick={() => setOpen(true)} data-testid="new-post-btn">New article</button>}</PageHeader>
       <DataTable testid="posts-table" loading={loading} rows={rows} onRow={(r) => nav(`/erp/insights/${r.id}`)} columns={[
-        { key: "title", label: "Title", render: (r) => <>{r.title}{r.audience === "investors" && <span className="ml-2"><Badge v="investors only" tone="blue" /></span>}</> }, { key: "category", label: "Section", render: (r) => label(r.category) },
-        { key: "status", label: "Status", render: (r) => <><Badge v={r.status} tone={r.status === "published" ? "green" : r.status === "scheduled" ? "blue" : "grey"} />{r.status === "scheduled" && r.publish_at && <span className="block text-xs text-slate-500">{fmtDateTime(r.publish_at)}</span>}</> },
+        { key: "title", label: "Title", m: "title", render: (r) => <>{r.title}{r.audience === "investors" && <span className="ml-2"><Badge v="investors only" tone="blue" /></span>}</> }, { key: "category", label: "Section", render: (r) => label(r.category) },
+        { key: "status", label: "Status", m: "badge", render: (r) => <><Badge v={r.status} tone={r.status === "published" ? "green" : r.status === "scheduled" ? "blue" : "grey"} />{r.status === "scheduled" && r.publish_at && <span className="block text-xs text-slate-500">{fmtDateTime(r.publish_at)}</span>}</> },
         { key: "author_name", label: "Author" }, { key: "updated_at", label: "Updated", render: (r) => fmtDateTime(r.updated_at) },
       ]} empty="No articles yet." />
       <FormDialog open={open} onClose={() => setOpen(false)} title="New article" initial={{ category: "market_update", audience: "public", body: "## Heading\n\nStart writing here. Use ## for headings, - for lists and **bold** for emphasis." }}

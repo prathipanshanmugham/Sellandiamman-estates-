@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, inr, label, fmtDateTime } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { Kpi, PageHeader, Section, DataTable, act } from "../../components/erp/kit";
+import { Kpi, PageHeader, Section, DataTable, DateRange, act } from "../../components/erp/kit";
 
 const STAGES = ["new", "contacted", "qualified", "requirements", "matched", "site_visit", "negotiation", "won", "lost"];
 
@@ -20,9 +20,8 @@ export default function Dashboard() {
   const f = d.finance;
   return (
     <div className="space-y-6" data-testid="dashboard">
-      <PageHeader title={`Welcome, ${user.name}`} sub="Business overview. Figures respect your role's access.">
-        <input type="date" className="inp !w-auto" value={r.frm} onChange={(e) => setR({ ...r, frm: e.target.value })} data-testid="dash-from" aria-label="From" />
-        <input type="date" className="inp !w-auto" value={r.to} onChange={(e) => setR({ ...r, to: e.target.value })} data-testid="dash-to" aria-label="To" />
+      <PageHeader wrap title={`Welcome, ${user.name}`} sub="Business overview. Figures respect your role's access.">
+        <DateRange frm={r.frm} to={r.to} onChange={(x) => setR({ ...r, ...x })} ids={["dash-from", "dash-to"]} />
         <button className="btn-line btn-sm" onClick={async () => { const x = await act(() => api.post("/automations/run")); if (x) act(async () => x, `Checked ${x.data.checked} reminders`); }} data-testid="run-reminders-btn">Check reminders now</button>
       </PageHeader>
       {d.leads && <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
@@ -67,8 +66,8 @@ export default function Dashboard() {
       <div className="grid gap-6 xl:grid-cols-2">
         {d.leads && <Section title="Lead pipeline"><ResponsiveContainer width="100%" height={240}><BarChart data={STAGES.map((s) => ({ stage: label(s), n: d.leads.by_stage[s] || 0 }))}><CartesianGrid stroke="#f1f5f9" /><XAxis dataKey="stage" tick={{ fontSize: 10 }} interval={0} angle={-20} height={50} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="n" name="Leads" fill="#334155" /></BarChart></ResponsiveContainer></Section>}
         {f && <Section title="Collections vs expenses (6 months)"><ResponsiveContainer width="100%" height={240}><BarChart data={f.trend}><CartesianGrid stroke="#f1f5f9" /><XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => inr(v, true)} width={70} /><Tooltip formatter={(v) => inr(v)} /><Legend /><Bar dataKey="collected" name="Collected" fill="#1e293b" /><Bar dataKey="expenses" name="Expenses" fill="#94a3b8" /></BarChart></ResponsiveContainer></Section>}
-        {d.leads && <Section title="Lead sources"><DataTable testid="lead-sources-table" columns={[{ key: "source", label: "Source", render: (x) => label(x.source) }, { key: "leads", label: "Leads" }, { key: "won", label: "Won" }]} rows={d.leads.by_source} /></Section>}
-        {d.staff && <Section title="Staff workload & conversion"><DataTable testid="staff-table" columns={[{ key: "name", label: "Staff" }, { key: "open", label: "Open leads" }, { key: "won", label: "Won" }, { key: "conversion", label: "Conversion", render: (x) => `${x.conversion}%` }]} rows={d.staff} /></Section>}
+        {d.leads && <Section title="Lead sources"><DataTable testid="lead-sources-table" columns={[{ key: "source", label: "Source", m: "title", render: (x) => label(x.source) }, { key: "leads", label: "Leads" }, { key: "won", label: "Won" }]} rows={d.leads.by_source} /></Section>}
+        {d.staff && <Section title="Staff workload & conversion"><DataTable testid="staff-table" columns={[{ key: "name", label: "Staff", m: "title" }, { key: "open", label: "Open leads" }, { key: "won", label: "Won" }, { key: "conversion", label: "Conversion", render: (x) => `${x.conversion}%` }]} rows={d.staff} /></Section>}
         {f?.by_service?.length > 0 && <Section title="Revenue by service"><DataTable columns={[{ key: "service", label: "Service", render: (x) => label(x.service) }, { key: "amount", label: "Collected", render: (x) => inr(x.amount) }]} rows={f.by_service} /></Section>}
       </div>
     </div>

@@ -40,7 +40,7 @@ export default function Calendar() {
         <button className="btn-line btn-sm" onClick={() => move(1)} aria-label="Next month"><ChevronRight size={14} /></button>
         <button className="btn-line btn-sm" onClick={() => { setYm([Number(t.slice(0, 4)), Number(t.slice(5, 7)) - 1]); setDay(t); }}>Today</button>
       </PageHeader>
-      <div className="mb-4 flex flex-wrap gap-2">{Object.entries(TYPES).map(([k, [l, c]]) => <button key={k} className={`chip ${types.includes(k) ? "" : "opacity-40"}`} aria-pressed={types.includes(k)} onClick={() => setTypes(types.includes(k) ? types.filter((x) => x !== k) : [...types, k])}><i className={`inline-block h-2 w-2 ${c}`} />{l}</button>)}</div>
+      <div className="chip-row mb-4 flex flex-wrap gap-2">{Object.entries(TYPES).map(([k, [l, c]]) => <button key={k} className={`chip ${types.includes(k) ? "" : "opacity-40"}`} aria-pressed={types.includes(k)} onClick={() => setTypes(types.includes(k) ? types.filter((x) => x !== k) : [...types, k])}><i className={`inline-block h-2 w-2 ${c}`} />{l}</button>)}</div>
       <div className="hidden md:block">
         <div className="grid grid-cols-7 border-l border-t border-slate-200 bg-white">
           {WEEK.map((w) => <div key={w} className="border-b border-r border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{w}</div>)}

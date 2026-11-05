@@ -56,26 +56,26 @@ function Footer({ site }) {
   const social = Object.entries(site.social || {}).filter(([, v]) => v);
   return (
     <footer className="relative overflow-hidden bg-slate-900 text-slate-300">
-      <div className="container-x grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <Wordmark dark stacked />
-          <p className="mt-5 text-sm text-slate-400">{site.content.footer_tagline}</p>
+      <div className="container-x grid grid-cols-2 gap-x-6 gap-y-9 py-10 sm:gap-10 sm:py-14 lg:grid-cols-4">
+        <div className="col-span-2 sm:col-span-1">
+          <span className="sm:hidden"><Wordmark dark /></span><span className="hidden sm:block"><Wordmark dark stacked /></span>
+          <p className="mt-4 text-sm text-slate-400 sm:mt-5">{site.content.footer_tagline}</p>
           {site.rera_no && <p className="mt-3 text-xs text-slate-500" data-testid="footer-rera">TNRERA agent registration: {site.rera_no}</p>}
           {social.length > 0 && <div className="mt-5 flex gap-2">{social.map(([k, url]) => { const I = SOCIAL[k] || Globe; return <a key={k} href={url} target="_blank" rel="noopener noreferrer" aria-label={k.replace("_", " ")} className="border border-slate-700 p-2 text-slate-400 hover:border-slate-500 hover:text-white"><I size={16} /></a>; })}</div>}
         </div>
         <div>
           <p className="eyebrow !text-slate-500">Services</p>
-          <ul className="mt-4 space-y-2 text-sm">{site.content.services.slice(0, 7).map((s) => <li key={s.slug}><Link className="hover:text-white" to={`/services/${s.slug}`}>{s.title}</Link></li>)}</ul>
-          {site.branches.length > 0 && <><p className="eyebrow mt-8 !text-slate-500">Properties by town</p>
-            <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm" data-testid="footer-towns">{site.branches.map((b) => <li key={b.id}><Link className="hover:text-white" to={placeUrl(b.city)}>{b.city}</Link></li>)}</ul></>}
+          <ul className="mt-3 space-y-0.5 text-sm sm:mt-4">{site.content.services.slice(0, 7).map((s) => <li key={s.slug}><Link className="block py-1 leading-snug hover:text-white" to={`/services/${s.slug}`}>{s.title}</Link></li>)}</ul>
+          {site.branches.length > 0 && <><p className="eyebrow mt-7 !text-slate-500 sm:mt-8">Properties by town</p>
+            <ul className="mt-2 flex flex-wrap gap-x-4 text-sm sm:mt-3" data-testid="footer-towns">{site.branches.map((b) => <li key={b.id}><Link className="block py-1 hover:text-white" to={placeUrl(b.city)}>{b.city}</Link></li>)}</ul></>}
         </div>
         <div>
           <p className="eyebrow !text-slate-500">Company</p>
-          <ul className="mt-4 space-y-2 text-sm">
-            {[["/about", "About us"], ["/insights", "Insights & guides"], ["/requirement", "Post your requirement"], ["/faq", "FAQ"], ["/legal/privacy", "Privacy policy"], ["/legal/terms", "Terms of service"], ["/legal/disclaimer", "Listing disclaimer"], ["/legal/cookies", "Cookie policy"]].map(([to, l]) => <li key={to}><Link className="hover:text-white" to={to}>{l}</Link></li>)}
+          <ul className="mt-3 space-y-0.5 text-sm sm:mt-4">
+            {[["/about", "About us"], ["/insights", "Insights & guides"], ["/requirement", "Post your requirement"], ["/faq", "FAQ"], ["/legal/privacy", "Privacy policy"], ["/legal/terms", "Terms of service"], ["/legal/disclaimer", "Listing disclaimer"], ["/legal/cookies", "Cookie policy"]].map(([to, l]) => <li key={to}><Link className="block py-1 leading-snug hover:text-white" to={to}>{l}</Link></li>)}
           </ul>
         </div>
-        <div className="space-y-3 text-sm" data-testid="footer-contact">
+        <div className="col-span-2 space-y-3 text-sm sm:col-span-1" data-testid="footer-contact">
           <p className="eyebrow !text-slate-500">Contact</p>
           {site.address && <p className="flex gap-2"><MapPin size={16} className="mt-0.5 shrink-0" />{site.address}</p>}
           {site.branches.length > 1 && <p className="text-xs text-slate-400">Branches: {site.branches.map((b) => b.name).join(" · ")}. <Link to="/contact" className="underline">Addresses</Link></p>}
@@ -85,11 +85,11 @@ function Footer({ site }) {
         </div>
       </div>
       <div className="border-t border-slate-800">
-        <div className="container-x flex flex-col justify-between gap-2 py-5 text-xs text-slate-500 sm:flex-row">
+        <div className="container-x flex flex-col justify-between gap-3 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-xs text-slate-500 sm:flex-row sm:gap-2">
           <span>© {new Date().getFullYear()} Sellandiamman Estates. All rights reserved.</span>
-          <span className="flex flex-wrap gap-x-4 gap-y-1"><span>Listings are subject to verification and availability. <Link to="/legal/disclaimer" className="underline">Disclaimer</Link></span>
-            <Link to="/login" className="underline hover:text-slate-300" data-testid="footer-customer-login">Customer login</Link>
-            <Link to="/erp/login" className="underline hover:text-slate-300" data-testid="footer-staff-login">Staff sign in</Link></span>
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1"><span className="w-full sm:w-auto">Listings are subject to verification and availability. <Link to="/legal/disclaimer" className="underline">Disclaimer</Link></span>
+            <Link to="/login" className="py-1.5 underline hover:text-slate-300" data-testid="footer-customer-login">Customer login</Link>
+            <Link to="/erp/login" className="py-1.5 underline hover:text-slate-300" data-testid="footer-staff-login">Staff sign in</Link></span>
         </div>
       </div>
     </footer>

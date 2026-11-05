@@ -12,7 +12,7 @@ function Avatar({ p, size = 44 }) {
 
 function Contacts({ p, small }) {
   const wa = waLink(p.whatsapp || p.phone, `Hello ${p.name.split(" ")[0]},`);
-  const cls = small ? "p-1 text-slate-500 hover:text-slate-900" : "btn-line btn-sm";
+  const cls = small ? "p-2 text-slate-500 hover:text-slate-900 sm:p-1" : "btn-line btn-sm";
   return (
     <span className="flex flex-wrap justify-center gap-1">
       {p.phone && <a href={telLink(p.phone)} className={cls} aria-label={`Call ${p.name}`} title={p.phone}><Phone size={13} />{!small && "Call"}</a>}
@@ -82,7 +82,7 @@ export default function Team() {
         <span className="relative ml-auto"><Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" /><input className="inp !pl-8 sm:!w-64" placeholder="Find a person" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a person" /></span>
       </div>
       {view === "chart" && <div ref={chartBox} className="panel overflow-x-auto p-4" data-testid="org-chart"><div className="org-tree min-w-max"><ul>{roots.map((r) => <Node key={r.id} p={r} kids={kids} branchName={branchName} highlight={match?.id} />)}</ul></div></div>}
-      {view === "directory" && <DataTable testid="team-directory" rows={filtered} columns={[{ key: "name", label: "Name", render: (p) => <span className="flex items-center gap-2"><Avatar p={p} size={28} /><span><span className="font-medium">{p.name}</span><span className="block text-xs text-slate-500">{p.designation || p.role_label}</span></span></span> }, { key: "department", label: "Team", render: (p) => p.department || label(p.role) }, { key: "branch", label: "Branch", render: branchName }, { key: "reports_to", label: "Reports to", render: (p) => people.find((x) => x.id === p.reports_to)?.name || "-" }, { key: "phone", label: "Phone", render: (p) => p.phone || "-" }, { key: "email", label: "Email", render: (p) => <span className="break-all">{p.email}</span> }, { key: "x", label: "", render: (p) => <Contacts p={p} small /> }]} />}
+      {view === "directory" && <DataTable testid="team-directory" rows={filtered} columns={[{ key: "name", label: "Name", m: "title", render: (p) => <span className="flex items-center gap-2"><Avatar p={p} size={28} /><span><span className="font-medium">{p.name}</span><span className="block text-xs text-slate-500">{p.designation || p.role_label}</span></span></span> }, { key: "department", label: "Team", render: (p) => p.department || label(p.role) }, { key: "branch", label: "Branch", render: branchName }, { key: "reports_to", label: "Reports to", render: (p) => people.find((x) => x.id === p.reports_to)?.name || "-" }, { key: "phone", label: "Phone", render: (p) => p.phone || "-" }, { key: "email", label: "Email", m: "wide", render: (p) => <span className="break-all">{p.email}</span> }, { key: "x", label: "", render: (p) => <Contacts p={p} small /> }]} />}
       {view === "branches" && <div className="grid gap-4 lg:grid-cols-2" data-testid="team-branches">
         {d.branches.map((b) => { const staff = filtered.filter((p) => p.branch_ids?.includes(b.id)); const mgr = people.find((p) => p.id === b.manager_id); return (
           <Section key={b.id} title={<span className="flex items-center gap-2"><Building2 size={15} />{b.name}{b.is_head_office && <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Head office</span>}</span>}>

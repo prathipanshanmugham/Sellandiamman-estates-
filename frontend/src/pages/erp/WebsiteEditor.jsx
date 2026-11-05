@@ -90,7 +90,7 @@ export default function WebsiteEditor() {
         {can("cms", "p") && <button className="btn-dark btn-sm" disabled={!changed || busy} onClick={publish} data-testid="cms-publish-btn">Publish</button>}
       </PageHeader>
       <Tabs defaultValue="home">
-        <TabsList className="flex h-auto flex-wrap justify-start rounded-sm"><TabsTrigger value="home">Home page</TabsTrigger><TabsTrigger value="services">Services</TabsTrigger><TabsTrigger value="why">Why us</TabsTrigger><TabsTrigger value="faq">FAQ</TabsTrigger><TabsTrigger value="about">About & contact</TabsTrigger><TabsTrigger value="reviews">Reviews</TabsTrigger><TabsTrigger value="seo">Search & AI</TabsTrigger><TabsTrigger value="history"><History size={13} className="mr-1" />History</TabsTrigger></TabsList>
+        <TabsList className="rounded-sm"><TabsTrigger value="home">Home page</TabsTrigger><TabsTrigger value="services">Services</TabsTrigger><TabsTrigger value="why">Why us</TabsTrigger><TabsTrigger value="faq">FAQ</TabsTrigger><TabsTrigger value="about">About & contact</TabsTrigger><TabsTrigger value="reviews">Reviews</TabsTrigger><TabsTrigger value="seo">Search & AI</TabsTrigger><TabsTrigger value="history"><History size={13} className="mr-1" />History</TabsTrigger></TabsList>
 
         <TabsContent value="home" className="mt-4 space-y-6">
           <Section title="Top of the page">

@@ -101,7 +101,7 @@ export function InvestorPayouts() {
     <div className="space-y-6">
       <h1 className="font-heading text-2xl font-semibold">Payouts</h1>
       <div className="grid grid-cols-3 gap-3"><Kpi title="Gross" value={inr(tot.gross, true)} /><Kpi title="TDS deducted" value={inr(tot.tds, true)} hint="Shown in your Form 26AS / AIS" /><Kpi title="Paid to you" value={inr(tot.net, true)} /></div>
-      <DataTable testid="investor-payouts" loading={!rows} rows={rows || []} columns={[{ key: "date", label: "Date", render: (x) => fmtDate(x.date) }, { key: "project_name", label: "Project" }, { key: "kind", label: "Type", render: (x) => label(x.kind) }, { key: "period", label: "Period" }, { key: "gross", label: "Gross", render: (x) => inr(x.gross) }, { key: "tds", label: "TDS", render: (x) => inr(x.tds) }, { key: "net", label: "Paid", render: (x) => inr(x.net) }, { key: "reference", label: "Reference" }]} empty="No payouts yet." />
+      <DataTable testid="investor-payouts" loading={!rows} rows={rows || []} columns={[{ key: "date", label: "Date", render: (x) => fmtDate(x.date) }, { key: "project_name", label: "Project", m: "title" }, { key: "kind", label: "Type", render: (x) => label(x.kind) }, { key: "period", label: "Period" }, { key: "gross", label: "Gross", render: (x) => inr(x.gross) }, { key: "tds", label: "TDS", render: (x) => inr(x.tds) }, { key: "net", label: "Paid", render: (x) => inr(x.net) }, { key: "reference", label: "Reference" }]} empty="No payouts yet." />
     </div>
   );
 }
@@ -129,7 +129,7 @@ export function InvestorDocuments() {
         <div className="flex flex-wrap items-end gap-2"><div><label className="lbl" htmlFor="st-f">From</label><input id="st-f" type="date" className="inp" value={r.frm} onChange={(e) => setR({ ...r, frm: e.target.value })} /></div><div><label className="lbl" htmlFor="st-t">To</label><input id="st-t" type="date" className="inp" value={r.to} onChange={(e) => setR({ ...r, to: e.target.value })} /></div><button className="btn-dark btn-sm" onClick={() => openFile(`/investor/statement.pdf?frm=${r.frm}&to=${r.to}`, { name: "Investor statement" })} data-testid="investor-statement-btn"><FileText size={13} />Statement PDF</button></div>
         <p className="mt-2 text-xs text-slate-500">Money in, payouts, TDS and the value of each holding for the period. Useful for your tax return.</p>
       </Section>
-      <Section title="Shared with you"><DataTable testid="investor-docs" loading={!rows} rows={rows || []} columns={[{ key: "original_name", label: "File" }, { key: "doc_type", label: "Type", render: (d) => label(d.doc_type) }, { key: "created_at", label: "Added", render: (d) => fmtDate(d.created_at) }, { key: "x", label: "", render: (d) => <button className="btn-line btn-sm" onClick={() => open(d)}>Open</button> }]} empty="No documents yet." /></Section>
+      <Section title="Shared with you"><DataTable testid="investor-docs" loading={!rows} rows={rows || []} columns={[{ key: "original_name", label: "File", m: "title" }, { key: "doc_type", label: "Type", render: (d) => label(d.doc_type) }, { key: "created_at", label: "Added", render: (d) => fmtDate(d.created_at) }, { key: "x", label: "", render: (d) => <button className="btn-line btn-sm" onClick={() => open(d)}>Open</button> }]} empty="No documents yet." /></Section>
     </div>
   );
 }

@@ -43,9 +43,9 @@ export default function ErpLayout() {
     <nav className="flex h-full flex-col bg-slate-900 text-slate-300" aria-label="Staff menu">
       <div className="flex items-center justify-between border-b border-slate-800 px-5 py-5"><Link to="/erp" aria-label="Dashboard"><Logo tone="dark" size="sm" /></Link><button className="p-1 text-slate-400 lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
       <div className="px-5 pt-3 lg:hidden"><BranchPicker user={user} className="w-full !border-slate-700 !bg-slate-800 !text-slate-200" /></div>
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto overscroll-contain py-2">
         {groups.map(([g, items]) => <div key={g} className="py-2"><p className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{g}</p>
-          {items.map(([to, l, Icon]) => <NavLink key={to} to={to} end={to === "/erp"} data-testid={`erp-nav-${l.split(" ")[0].toLowerCase()}`} className={({ isActive }) => `flex items-center gap-3 px-5 py-2 text-sm transition-colors ${isActive ? "bg-slate-800 text-white" : "hover:bg-slate-800/60 hover:text-white"}`}><Icon size={16} />{l}</NavLink>)}
+          {items.map(([to, l, Icon]) => <NavLink key={to} to={to} end={to === "/erp"} data-testid={`erp-nav-${l.split(" ")[0].toLowerCase()}`} className={({ isActive }) => `flex items-center gap-3 px-5 py-2.5 text-sm transition-colors lg:py-2 ${isActive ? "bg-slate-800 text-white" : "hover:bg-slate-800/60 hover:text-white"}`}><Icon size={16} />{l}</NavLink>)}
         </div>)}
       </div>
       <div className="border-t border-slate-800 p-4 text-xs">
@@ -57,20 +57,20 @@ export default function ErpLayout() {
   return (
     <div className="flex min-h-screen bg-slate-50">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 lg:block">{side}</aside>
-      {open && <div className="fixed inset-0 z-50 flex lg:hidden"><div className="w-72 max-w-[85vw]">{side}</div><div className="flex-1 bg-slate-900/40" onClick={() => setOpen(false)} /></div>}
+      {open && <div className="fixed inset-0 z-50 flex lg:hidden"><div className="h-full w-72 max-w-[85vw] shadow-2xl">{side}</div><div className="flex-1 bg-slate-900/40" onClick={() => setOpen(false)} /></div>}
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-3 sm:px-6">
-          <div className="flex items-center gap-2"><button className="p-2 lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu" data-testid="erp-menu-toggle"><Menu size={20} /></button><span className="lg:hidden"><Logo size="sm" /></span></div>
+          <div className="flex min-w-0 items-center gap-1"><button className="-ml-1 p-2 lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu" data-testid="erp-menu-toggle"><Menu size={20} /></button><span className="lg:hidden"><Logo size="sm" /></span></div>
           <span className="hidden text-xs text-slate-400 xl:block">Sellandiamman Estates · staff workspace · times in IST</span>
           <div className="flex items-center gap-0.5">
             <BranchPicker user={user} className="hidden sm:block" />
             <Notifications />
-            <Link to="/erp/security" className="p-2 text-slate-600 hover:text-slate-900" aria-label="Password & 2-step sign-in" data-testid="change-password-link"><KeyRound size={18} /></Link>
-            <button className="flex items-center gap-1 p-2 text-sm text-slate-600 hover:text-slate-900" onClick={async () => { await logout(); nav("/erp/login"); }} data-testid="logout-btn" aria-label="Sign out"><LogOut size={16} /><span className="hidden sm:inline">Sign out</span></button>
+            <Link to="/erp/security" className="hidden p-2 text-slate-600 hover:text-slate-900 sm:block" aria-label="Password & 2-step sign-in" data-testid="change-password-link"><KeyRound size={18} /></Link>
+            <button className="flex items-center gap-1 p-2 text-sm text-slate-600 hover:text-slate-900 max-sm:-mr-1" onClick={async () => { await logout(); nav("/erp/login"); }} data-testid="logout-btn" aria-label="Sign out"><LogOut size={16} /><span className="hidden sm:inline">Sign out</span></button>
           </div>
         </header>
         {user.mfa_enabled === false && (user.role === "super_admin" || user.role === "director") && loc.pathname === "/erp" && <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:px-6" data-testid="mfa-nudge">Your account can approve payments and change settings. <Link to="/erp/security" className="font-semibold underline">Turn on 2-step sign-in</Link> to protect it.</div>}
-        <main className="p-4 sm:p-6 lg:p-8"><Outlet key={branch} /></main>
+        <main className="px-4 pb-10 pt-5 sm:p-6 lg:p-8"><Outlet key={branch} /></main>
       </div>
     </div>
   );

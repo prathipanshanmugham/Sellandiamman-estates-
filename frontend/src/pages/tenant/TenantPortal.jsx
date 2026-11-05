@@ -110,15 +110,15 @@ export function TenantOverview() {
           </section>
         );
       })}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-3">
         <Kpi title="Bills due" value={inr(d.bills_total, true)} hint={`${d.bills_due.length} bill${d.bills_due.length === 1 ? "" : "s"} (EB, water…)`} testid="tenant-kpi-bills" />
         <Kpi title="Open requests" value={d.open_requests} hint={d.pending_notices ? `${d.pending_notices} payment${d.pending_notices > 1 ? "s" : ""} waiting for our check` : "Repairs, cleaning, documents"} testid="tenant-kpi-requests" />
       </div>
       {d.bills_due.length > 0 && <Section title="Bills to pay" actions={<Link to="/tenant/bills" className="text-xs underline">All bills</Link>}>
         <div className="divide-y divide-slate-100" data-testid="tenant-bills-due">{d.bills_due.map((b) => { const I = KIND_ICON[b.kind] || Receipt; return (
-          <div key={b.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div key={b.id} className="flex items-start justify-between gap-3 py-3 sm:items-center">
             <div className="flex min-w-0 items-start gap-3"><I size={18} className="mt-0.5 shrink-0 text-slate-400" /><div className="min-w-0"><p className="font-medium">{b.label}</p><p className="text-xs text-slate-500">Due {fmtDate(b.due_date)}{b.overdue ? " · overdue" : ""}{b.mode === "direct" ? " · pay the provider directly" : ""}</p></div></div>
-            <div className="flex items-center gap-2"><span className="font-semibold tabular">{inr(b.balance)}</span>{b.mode === "collect" ? <button className="btn-dark btn-sm" onClick={() => setPay({ lease_id: b.lease_id, kind: "charge", charge_id: b.id })} data-testid={`pay-bill-${b.code}`}>Pay</button> : <button className="btn-line btn-sm" onClick={() => setNotice({ lease_id: b.lease_id, kind: "charge", charge_id: b.id, amount: b.balance })}>I have paid</button>}</div>
+            <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center sm:gap-2"><span className="font-semibold tabular">{inr(b.balance)}</span>{b.mode === "collect" ? <button className="btn-dark btn-sm" onClick={() => setPay({ lease_id: b.lease_id, kind: "charge", charge_id: b.id })} data-testid={`pay-bill-${b.code}`}>Pay</button> : <button className="btn-line btn-sm" onClick={() => setNotice({ lease_id: b.lease_id, kind: "charge", charge_id: b.id, amount: b.balance })}>I have paid</button>}</div>
           </div>); })}</div>
       </Section>}
       {d.pay_to?.upi_id && <p className="text-xs text-slate-500">Rent and bills go to {d.pay_to.account_name || "our collection account"} (UPI {d.pay_to.upi_id}). Never pay anyone who calls asking for a different account.</p>}
@@ -147,7 +147,7 @@ export function TenantRent() {
             <Facts items={[["Period", `${fmtDate(l.start_date)} – ${fmtDate(l.end_date)}`], ["Rent", `${inr(l.rent)} a month, due on day ${l.due_day}`], ["Yearly increase", `${l.escalation_pct}% every ${l.escalation_every_months} months`], ["Deposit held", inr(l.deposit_held)], ["Paid so far", inr(l.paid_total)], ["Overdue", <b className={l.arrears > 0 ? "text-red-700" : ""}>{inr(l.arrears)}</b>]]} />
             {l.status === "active" && <div className="mt-4 flex flex-wrap gap-2">{l.next_due && <button className="btn-dark btn-sm" onClick={() => setPay({ lease_id: l.id, kind: "rent", period: l.next_due.period })}>Pay {monthLabel(l.next_due.period)}</button>}<button className="btn-line btn-sm" onClick={() => setNotice({ lease_id: l.id, kind: "rent", period: l.next_due?.period })} data-testid="rent-paid-btn">I have paid</button></div>}
           </Section>
-          {l.notices?.length > 0 && <Section title="Payments you told us about"><DataTable testid="tenant-notices" rows={l.notices} columns={[{ key: "label", label: "For" }, { key: "amount", label: "Amount", render: (n) => inr(n.amount) }, { key: "date", label: "Paid on", render: (n) => fmtDate(n.date) }, { key: "reference", label: "Reference" }, { key: "status", label: "Status", render: (n) => <>{<Badge v={n.status === "pending" ? "pending" : n.status === "confirmed" ? "paid" : "rejected"} text={{ pending: "Checking", confirmed: "Confirmed", rejected: "Not matched" }[n.status]} />}{n.reason && <span className="block text-xs text-slate-500">{n.reason}</span>}</> }]} /></Section>}
+          {l.notices?.length > 0 && <Section title="Payments you told us about"><DataTable testid="tenant-notices" rows={l.notices} columns={[{ key: "label", label: "For", m: "title" }, { key: "amount", label: "Amount", render: (n) => inr(n.amount) }, { key: "date", label: "Paid on", render: (n) => fmtDate(n.date) }, { key: "reference", label: "Reference" }, { key: "status", label: "Status", m: "badge", render: (n) => <>{<Badge v={n.status === "pending" ? "pending" : n.status === "confirmed" ? "paid" : "rejected"} text={{ pending: "Checking", confirmed: "Confirmed", rejected: "Not matched" }[n.status]} />}{n.reason && <span className="block text-xs text-slate-500">{n.reason}</span>}</> }]} /></Section>}
           <Section title="Month by month">
             <DataTable testid={`tenant-schedule-${l.code}`} rows={l.schedule} columns={[{ key: "period", label: "Month", render: (s) => monthLabel(s.period) }, { key: "due_date", label: "Due", render: (s) => fmtDate(s.due_date) }, { key: "amount", label: "Rent", render: (s) => inr(s.amount) }, { key: "paid", label: "Paid", render: (s) => inr(s.paid) }, { key: "st", label: "", render: (s) => s.paid >= s.amount - 0.001 ? <Badge v="paid" /> : s.due_date < t ? <Badge v="overdue" /> : s.paid > 0 ? <Badge v="partly_paid" /> : <Badge v="upcoming" text="Upcoming" /> }]} />
           </Section>
@@ -217,7 +217,7 @@ export function TenantDocuments() {
   return (
     <div className="space-y-6">
       <h1 className="font-heading text-2xl font-semibold">Documents</h1>
-      <DataTable testid="tenant-documents" rows={d.documents} empty="No documents shared with you yet. Your rental agreement appears here once it is signed." columns={[{ key: "original_name", label: "Document" }, { key: "doc_type", label: "Type", render: (x) => label(x.doc_type) }, { key: "created_at", label: "Added", render: (x) => fmtDate(x.created_at) }, { key: "x", label: "", render: (x) => <button className="btn-line btn-sm" onClick={() => open(x)}>Open</button> }]} />
+      <DataTable testid="tenant-documents" rows={d.documents} empty="No documents shared with you yet. Your rental agreement appears here once it is signed." columns={[{ key: "original_name", label: "Document", m: "title" }, { key: "doc_type", label: "Type", render: (x) => label(x.doc_type) }, { key: "created_at", label: "Added", render: (x) => fmtDate(x.created_at) }, { key: "x", label: "", render: (x) => <button className="btn-line btn-sm" onClick={() => open(x)}>Open</button> }]} />
       <p className="text-xs text-slate-500">Need something else, like an address-proof letter or a copy of the agreement? <Link to="/tenant/requests" className="underline">Raise a documents request</Link>.</p>
     </div>
   );
