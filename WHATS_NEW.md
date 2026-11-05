@@ -1,3 +1,21 @@
+# What's new – Round 6 (5 Nov 2026)
+
+## AI agents & MCP
+- New screen **Team & admin → AI agents & MCP**. Make an agent for a job (business analyst, sales assistant, rent &
+  collections, property care desk, short-stay desk, listings assistant, or your own), choose whose staff login it
+  works as, and whether it may only read or also add and change records. Copy its key once, then add it to Claude as a
+  custom connector (the screen shows the steps with the address and key filled in), or to Claude Code with one command.
+- The agent sees exactly what that person sees: their role, their branches, their own leads or leases where the role
+  is limited. It can search, list and open records, run reports, read the CEO view, calendar, owner statements and
+  short-stay figures, and (read & write agents) add leads, log calls, book site visits, reply to service requests,
+  raise work orders, add tenant bills, check guests in and add tasks.
+- It never deletes, decides approvals, records money (rent, payments, invoices, expenses, payouts, prices), or touches
+  logins, settings, the website or the password vault.
+- Every call is listed under **Activity** (90 days, secrets masked); changes show in the audit log as
+  "person (AI agent: name)". Pause, new key, end date and revoke on each agent. 240 calls a minute per agent.
+- Ready-made requests in Claude: daily brief, lead follow-ups, rent collections list, service desk check, short stays
+  this week. Details in `docs/AI_AGENTS.md`.
+
 # What's new – Round 5 (5 Nov 2026)
 
 ## Cleaner on phones

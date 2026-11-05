@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, Building2, UserSquare, Handshake, FileText, Wrench, CalendarDays, CalendarRange, Wallet, CheckSquare, FolderLock, BarChart3, Settings, ShieldCheck, ScrollText, Menu, LogOut, Stamp, Newspaper, KeyRound, ExternalLink, X, Gauge, Contact, FileSignature, PiggyBank, Calculator, PanelsTopLeft, Network, MapPinned, LifeBuoy, LockKeyhole } from "lucide-react";
+import { LayoutDashboard, Users, Building2, UserSquare, Handshake, FileText, Wrench, CalendarDays, CalendarRange, Wallet, CheckSquare, FolderLock, BarChart3, Settings, ShieldCheck, ScrollText, Menu, LogOut, Stamp, Newspaper, KeyRound, ExternalLink, X, Gauge, Contact, FileSignature, PiggyBank, Calculator, PanelsTopLeft, Network, MapPinned, LifeBuoy, LockKeyhole, Bot } from "lucide-react";
 import { Notifications } from "../NotificationBell";
 import { useAuth } from "../../lib/auth";
 import { branchApi, useBranchPick, cachedGet } from "../../lib/api";
@@ -12,7 +12,7 @@ const NAV = [
   ["Operations", [["/erp/leases", "Leases & Rent", FileText, "leases"], ["/erp/tickets", "Service requests", LifeBuoy, "maintenance"], ["/erp/maintenance", "Maintenance", Wrench, "maintenance"], ["/erp/short-stay", "Short stays", CalendarDays, "shortstay"], ["/erp/documents", "Documents", FolderLock, "documents"]]],
   ["Money", [["/erp/finance", "Finance", Wallet, "finance"], ["/erp/investors", "Investors", PiggyBank, "investors"], ["/erp/reports", "Reports", BarChart3, "reports"], ["/erp/tools", "Tools & calculators", Calculator, null]]],
   ["Website", [["/erp/website", "Website editor", PanelsTopLeft, "cms"], ["/erp/insights", "Insights", Newspaper, "cms"]]],
-  ["Team & admin", [["/erp/team", "Team chart", Network, null], ["/erp/places", "Branches & places", MapPinned, "settings|properties"], ["/erp/users", "Users & Roles", ShieldCheck, "users"], ["/erp/vault", "Password vault", LockKeyhole, "vault"], ["/erp/settings", "Settings", Settings, "settings|cms"], ["/erp/audit", "Audit Log", ScrollText, "audit"]]],
+  ["Team & admin", [["/erp/team", "Team chart", Network, null], ["/erp/places", "Branches & places", MapPinned, "settings|properties"], ["/erp/users", "Users & Roles", ShieldCheck, "users"], ["/erp/vault", "Password vault", LockKeyhole, "vault"], ["/erp/ai-agents", "AI agents & MCP", Bot, "ai"], ["/erp/settings", "Settings", Settings, "settings|cms"], ["/erp/audit", "Audit Log", ScrollText, "audit"]]],
 ];
 
 // Staff who work across branches choose one to narrow every list, total and report; "All" shows everything they may see.

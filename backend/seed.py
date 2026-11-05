@@ -46,6 +46,10 @@ async def ensure_indexes():
     for c in ("branches", "customers", "locations", "stay_channels", "stay_blocks", "investors", "inv_projects", "investments",
               "distributions", "agreements", "site_versions"):
         await db[c].create_index("id", unique=True)
+    await db.ai_agents.create_index("id", unique=True)
+    await db.ai_agents.create_index("key_hash", unique=True)
+    await db.ai_agent_calls.create_index([("agent_id", 1), ("at", -1)])
+    await db.ai_agent_calls.create_index("at")
     await db.customers.create_index("phone")
     await db.customers.create_index([("branch_id", 1), ("created_at", -1)])
     await db.locations.create_index([("kind", 1), ("city", 1), ("name", 1)])

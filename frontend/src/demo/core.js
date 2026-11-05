@@ -13,7 +13,7 @@ export function resetDb() {
     "credit_notes", "ledger_entries", "leases", "rent_payments", "deposit_movements", "owner_statements", "work_orders", "vendors",
     "bookings", "tasks", "approvals", "expenses", "posts", "documents", "campaigns", "notifications", "audit_logs", "counters", "verifications",
     "customers", "locations", "stay_channels", "stay_blocks", "investors", "inv_projects", "investments", "distributions", "agreements",
-    "site_content", "site_versions", "lead_activities", "tickets", "lease_charges", "charge_payments", "payment_notices", "vault_items", "vault_history"]
+    "site_content", "site_versions", "lead_activities", "tickets", "lease_charges", "charge_payments", "payment_notices", "vault_items", "vault_history", "ai_agents", "ai_agent_calls"]
     .forEach((c) => { if (!db[c]) db[c] = []; });
 }
 resetDb();
@@ -61,7 +61,7 @@ export const settings = () => db.settings.find((s) => s.id === "company") || {};
 // ---------- Roles & permissions (backend/core.py) ----------
 export const ROLES = { super_admin: "Super Administrator", director: "Owner / Director", branch_manager: "Branch / Operations Manager", sales_agent: "Sales / Brokerage Agent", property_manager: "Property Manager", accountant: "Finance / Accountant", marketing: "Marketing Staff", shortstay_ops: "Short-Stay Operations", auditor: "Read-Only Auditor", owner: "Owner / Lessor (portal)", investor: "Investor (portal)", tenant: "Tenant (portal)", buyer: "Buyer / Client (portal)" };
 export const PORTAL_ROLES = ["owner", "investor", "tenant", "buyer"];
-const MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases", "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users", "settings", "audit", "vault"];
+const MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases", "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users", "settings", "audit", "vault", "ai"];
 const all = (p) => Object.fromEntries(MODULES.map((m) => [m, p]));
 export const PERMS = {
   super_admin: all("rwaep"),
@@ -72,7 +72,7 @@ export const PERMS = {
   accountant: { dashboard: "r", ceo: "re", finance: "rwe", deals: "r", leases: "r", shortstay: "r", owners: "r", customers: "r", investors: "rwe", agreements: "r", reports: "re", tasks: "rw", maintenance: "r", vault: "rw" },
   marketing: { dashboard: "r", properties: "rp", cms: "rwp", leads: "r", tasks: "rw", vault: "rw" },
   shortstay_ops: { dashboard: "r", shortstay: "rw", maintenance: "rw", properties: "r", tasks: "rw", documents: "r", vault: "rw" },
-  auditor: { dashboard: "r", ceo: "re", leads: "r", customers: "r", properties: "r", owners: "r", deals: "r", finance: "r", leases: "r", maintenance: "r", shortstay: "r", investors: "r", agreements: "r", reports: "re", audit: "r" },
+  auditor: { dashboard: "r", ceo: "re", leads: "r", customers: "r", properties: "r", owners: "r", deals: "r", finance: "r", leases: "r", maintenance: "r", shortstay: "r", investors: "r", agreements: "r", reports: "re", audit: "r", ai: "r" },
   owner: {},
   investor: {},
   tenant: {},

@@ -61,7 +61,7 @@ PORTAL_ROLES = ("owner", "investor", "tenant", "buyer")
 STAFF_ROLES = [r for r in ROLES if r not in PORTAL_ROLES]
 MODULES = ["dashboard", "ceo", "leads", "customers", "properties", "owners", "deals", "finance", "leases",
            "maintenance", "shortstay", "documents", "agreements", "investors", "tasks", "reports", "cms", "users",
-           "settings", "audit", "vault"]
+           "settings", "audit", "vault", "ai"]
 # r=read w=write a=approve e=export p=publish
 PERMS = {
     "super_admin": {m: "rwaep" for m in MODULES},
@@ -83,7 +83,7 @@ PERMS = {
                       "documents": "r", "vault": "rw"},
     "auditor": {"dashboard": "r", "ceo": "re", "leads": "r", "customers": "r", "properties": "r", "owners": "r",
                 "deals": "r", "finance": "r", "leases": "r", "maintenance": "r", "shortstay": "r", "investors": "r",
-                "agreements": "r", "reports": "re", "audit": "r"},
+                "agreements": "r", "reports": "re", "audit": "r", "ai": "r"},
     # Customers use their own portals (/api/portal/*, /api/investor/*, /api/tenant/*, /api/buyer/*, /api/my/*),
     # scoped to their own records. The auditor never sees the password vault.
     "owner": {},
@@ -227,6 +227,10 @@ async def current_user(request: Request):
         raise HTTPException(401, "Session expired")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid session")
+    if payload.get("typ") == "agent":
+        return await agent_user(request, payload)
+    if payload.get("typ") in ("mfa", "file"):
+        raise HTTPException(401, "Invalid session")
     sess = await db.sessions.find_one({"sid": payload.get("sid"), "revoked": False})
     if not sess or sess["expires_at"] < now():
         raise HTTPException(401, "Session expired or revoked")
@@ -240,6 +244,100 @@ async def current_user(request: Request):
     if not user.get("mfa_enabled") and not request.url.path.startswith(MFA_EXEMPT):
         if mfa_required_for(user, await get_settings_cached()):
             raise HTTPException(403, "mfa_setup_required")
+    return user
+
+
+# ------------------------------------------------------------------ AI agents (MCP, see routes_ai.py)
+# An AI agent works as one staff login: that person's role, branches and record scope apply to everything it does.
+# Its key is checked at /api/mcp; each tool call there runs as an ordinary request with a token that lives two
+# minutes and is never handed out. Whatever the role allows, an agent never deletes, never decides approvals, never
+# records money coming in or going out, and never touches logins, keys, settings, the website or the password vault.
+AGENT_TOKEN_MINUTES = 2
+AGENT_WRITE = ("POST", "PUT", "PATCH")
+# POSTs that only work something out and change nothing: allowed for read-only agents too
+AGENT_READ_POSTS = re.compile(r"^/api/(short-stay/quote|deals/commission-preview|agreements/preview)$")
+_AGENT_RULES = (
+    # (methods, path, why)
+    ("*", r"^/api/(auth|vault|ai|mcp|portal|tenant|buyer|investor|my|files)(/|$)", "people"),
+    ("*", r"^/api/users($|/(?!lite$))", "people"),  # the staff list (/api/users/lite) stays readable
+    ("*", r"^/api/(team/me|automations/run|customers/[^/]+/data\.json)$", "people"),
+    ("*", r"^/api/approvals/[^/]+/decide$", "approvals"),
+    ("W", r"^/api/(settings|branches|locations|cms|posts)(/|$)", "settings"),
+    ("W", r"^/api/(leads|customers)/(import|[^/]+/(anonymise|merge|logins|consent|kyc))$", "people"),
+    ("W", r"^/api/(owners|investors)/[^/]+/portal-invite$", "people"),
+    ("W", r"^/api/leases/[^/]+/(tenant-login|rent|deposit|terminate|handover)$", "money"),
+    ("W", r"^/api/(invoices|expenses|investments)(/|$)", "money"),
+    ("W", r"^/api/(charges|payment-notices|owner-statements|ledger)/", "money"),
+    ("W", r"^/api/owners/[^/]+/statement/settle$", "money"),
+    ("W", r"^/api/bookings/[^/]+/settle$", "money"),
+    ("W", r"^/api/inv-projects/[^/]+/(distribute|valuations)$", "money"),
+    ("W", r"^/api/deals/[^/]+/(close|commission|invoice|cancel)$", "money"),
+    ("W", r"^/api/short-stay/(units/[^/]+/pricing|channels)", "money"),
+    ("W", r"^/api/documents(/|$)", "people"),
+    ("W", r"^/api/properties/[^/]+/(verify|featured)$", "approvals"),
+    ("W", r"^/api/agreements/[^/]+/(finalise|signed)$", "approvals"),
+)
+AGENT_RULES = tuple((m, re.compile(rx), why) for m, rx, why in _AGENT_RULES)
+AGENT_WHY = {
+    "people": "AI agents can't use this part of the app: logins, customer portals, customer data exports, imports, merges and documents stay with people.",
+    "approvals": "AI agents can't approve, verify, finalise or sign. A person does that in the app.",
+    "settings": "AI agents can't change settings, branches or the website. A person does that in the app.",
+    "money": "AI agents don't record money coming in or going out (rent, payments, invoices, expenses, payouts, prices). "
+             "A person records it in the app; the agent can read it.",
+}
+
+
+def agent_blocked(access, method, path):
+    """Why an agent may not make this call, or None if it may."""
+    method = method.upper()
+    if method == "DELETE":
+        return "AI agents can't delete anything. Ask a person to do it in the app."
+    if method not in ("GET", "HEAD") + AGENT_WRITE:
+        return "Not allowed"
+    write = method in AGENT_WRITE and not AGENT_READ_POSTS.search(path)
+    if write and access != "write":
+        return "This agent has read-only access."
+    for when, rx, why in AGENT_RULES:
+        if rx.search(path) and (when == "*" or write):
+            return AGENT_WHY[why]
+    return None
+
+
+def make_agent_token(agent):
+    return jwt.encode({"sub": agent["user_id"], "aid": agent["id"], "kv": agent.get("key_version", 1), "typ": "agent",
+                       "exp": now() + timedelta(minutes=AGENT_TOKEN_MINUTES)}, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def agent_is_live(agent):
+    if not agent or not agent.get("active") or agent.get("revoked"):
+        return False
+    exp = agent.get("expires_on")
+    return not exp or exp >= today_ist().isoformat()
+
+
+async def agent_identity(agent):
+    """The staff login an agent works as, marked with the agent so the activity log shows both."""
+    user = await db.users.find_one({"id": agent["user_id"], "active": True},
+                                   {"_id": 0, "password_hash": 0, "mfa_secret": 0, "mfa_pending_secret": 0,
+                                    "mfa_recovery": 0, "photo": 0})
+    if not user or user["role"] in PORTAL_ROLES:
+        return None
+    user["sid"] = f"agent:{agent['id']}"
+    user["_agent"] = {"id": agent["id"], "name": agent["name"], "access": agent.get("access", "read")}
+    return user
+
+
+async def agent_user(request: Request, payload):
+    agent = await db.ai_agents.find_one({"id": payload.get("aid")}, {"_id": 0, "key_hash": 0})
+    if not agent_is_live(agent) or agent.get("key_version", 1) != payload.get("kv") or agent["user_id"] != payload.get("sub"):
+        raise HTTPException(401, "This AI agent is paused, revoked or its key was changed")
+    why = agent_blocked(agent.get("access"), request.method, request.url.path)
+    if why:
+        raise HTTPException(403, why)
+    user = await agent_identity(agent)
+    if not user:
+        raise HTTPException(401, "The staff login this agent works as is not active")
+    REQ_BRANCH.set((request.headers.get("x-branch") or "").strip()[:40] or None)
     return user
 
 
@@ -357,10 +455,14 @@ async def get_scoped(coll, module, user, rid):
 
 
 async def audit(user, action, entity, entity_id, details=None):
-    await db.audit_logs.insert_one({
-        "id": new_id(), "user_id": user["id"] if user else None, "user_name": user.get("name") if user else "public",
-        "role": user.get("role") if user else None, "action": action, "entity": entity, "entity_id": entity_id,
-        "details": details or {}, "at": now_iso()})
+    entry = {"id": new_id(), "user_id": user["id"] if user else None, "user_name": user.get("name") if user else "public",
+             "role": user.get("role") if user else None, "action": action, "entity": entity, "entity_id": entity_id,
+             "details": details or {}, "at": now_iso()}
+    ag = (user or {}).get("_agent")
+    if ag:  # done by an AI agent working as this person
+        entry["agent_id"], entry["agent_name"] = ag["id"], ag["name"]
+        entry["user_name"] = f"{entry['user_name']} (AI agent: {ag['name']})"
+    await db.audit_logs.insert_one(entry)
 
 
 SMTP = {k: os.environ.get(f"SMTP_{k}", "") for k in ("HOST", "PORT", "USER", "PASSWORD", "FROM", "TLS")}

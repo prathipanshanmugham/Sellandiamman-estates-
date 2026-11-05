@@ -30,16 +30,17 @@ import routes_bills
 import routes_tenant
 import routes_buyer
 import routes_vault
+import routes_ai
 from seed import seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-APP_VERSION = "2026.11.1"
+APP_VERSION = "2026.11.2"
 app = FastAPI(title="Sellandiamman Estates API", version=APP_VERSION, docs_url="/api/docs",
               openapi_url="/api/openapi.json")
 
 for r in (routes_auth, routes_public, routes_crm, routes_props, routes_deals, routes_finance, routes_ops, routes_admin,
           routes_content, routes_portal, routes_branches, routes_customers, routes_channels, routes_investors, routes_agreements,
-          routes_cms, routes_ceo, routes_seo, routes_tickets, routes_bills, routes_tenant, routes_buyer, routes_vault):
+          routes_cms, routes_ceo, routes_seo, routes_tickets, routes_bills, routes_tenant, routes_buyer, routes_vault, routes_ai):
     app.include_router(r.router, prefix="/api")
 
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", SITE_URL).split(",") if o.strip()]

@@ -58,6 +58,7 @@ const Audit = named(erp, "Audit");
 const Tickets = named(erp, "Tickets");
 const TicketDesk = named(erp, "TicketDesk");
 const Vault = named(erp, "Vault");
+const AiAgents = named(erp, "AiAgents");
 const owner = () => import("./pages/owner/OwnerPortal");
 const OwnerLayout = named(owner, "OwnerLayout");
 const OwnerOverview = named(owner, "OwnerOverview");
@@ -157,6 +158,7 @@ export default function App({ children }) {
               <Route path="tickets" element={g("maintenance", <Tickets />)} />
               <Route path="tickets/:id" element={g("maintenance", <TicketDesk />)} />
               <Route path="vault" element={g("vault", <Vault />)} />
+              <Route path="ai-agents" element={g("ai", <AiAgents />)} />
               <Route path="short-stay" element={g("shortstay", <ShortStay />)} />
               <Route path="documents" element={g("documents", <Documents />)} />
               <Route path="insights" element={g("cms", <InsightsList />)} />

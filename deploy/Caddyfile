@@ -36,6 +36,12 @@
 		-Server
 	}
 
+	# AI agents connect to /api/mcp with a key in a request header. There is no OAuth sign-in, so the discovery
+	# addresses answer 404 (otherwise the website page would answer and confuse the connector setup).
+	handle /.well-known/oauth-* {
+		respond 404
+	}
+
 	# API, file links and dynamic SEO files go to the backend
 	handle /api/* {
 		import backend

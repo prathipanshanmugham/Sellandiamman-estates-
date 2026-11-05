@@ -38,6 +38,7 @@ from PIL import Image  # noqa: E402
 import server  # noqa: E402
 import routes_admin  # noqa: E402
 import routes_vault  # noqa: E402
+import routes_ai  # noqa: E402
 from datetime import timedelta  # noqa: E402
 from core import db, today_ist, now_iso  # noqa: E402
 from routes_auth import _qr_svg  # noqa: E402
@@ -61,6 +62,14 @@ def rasterise(pdf_bytes, name):
         out.append(fn)
         p.unlink()
     return out
+
+
+def ai_meta():
+    """What the AI agents screen shows about the MCP server (templates, tools, ready-made requests)."""
+    return {"templates": routes_ai.TEMPLATES, "key_prefix": routes_ai.KEY_PREFIX, "calls_per_minute": routes_ai.CALLS_PER_MINUTE,
+            "keep_calls_days": routes_ai.KEEP_CALLS_DAYS,
+            "tools": [{"name": t["name"], "title": t["title"], "description": t["description"].split("\n")[0], "write": t.get("write", False)} for t in routes_ai.TOOLS],
+            "prompts": [{"name": p["name"], "title": p["title"], "description": p["description"]} for p in routes_ai.PROMPTS]}
 
 
 async def main():
@@ -172,7 +181,8 @@ async def main():
     meta = {"exported_at": now_iso(), "today": today_ist().isoformat(), "pdfs": pdfs, "upi_qr": upi_qr,
             "vault": {"presets": routes_vault.PRESETS, "categories": [{"key": k, "label": v} for k, v in routes_vault.CATEGORIES.items()]},
             "mfa_demo": {"secret": secret, "otpauth_uri": uri, "qr_svg": _qr_svg(uri)},
-            "agreement_templates": templates, "site_defaults": DEFAULT_SITE, "section_types": SECTION_TYPES}
+            "agreement_templates": templates, "site_defaults": DEFAULT_SITE, "section_types": SECTION_TYPES,
+            "ai": ai_meta()}
     OUT_JSON.write_text(json.dumps({"meta": meta, "db": snap}, default=str, separators=(",", ":")))
     size = OUT_JSON.stat().st_size
     print(f"snapshot: {len(snap)} collections, {size / 1024:.0f} KB; pdf images: {len(list(OUT_PDF.iterdir()))}")

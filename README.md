@@ -49,6 +49,11 @@ TNREGINET, EB, GST, income tax, Google, Meta, domain and hosting, banking, Wi-Fi
 `VAULT_KEY`, unlocked with your own password (+2-step), shared by role or person, 2-step codes for shared accounts,
 password generator, old passwords kept, change reminders and a full activity log.
 
+**AI agents & MCP** (`/erp/ai-agents`) – Claude, or any app that speaks MCP, connects to `/api/mcp` with an agent key and
+works as one staff login (that person's role, branches and records), read only or read & write. It never deletes,
+decides approvals, records money or touches logins, settings, the website or the vault. Keys are shown once, every call
+is logged for 90 days, and changes show in the audit log as "person (AI agent: name)". See `docs/AI_AGENTS.md`.
+
 **Investor dashboard** – each co-investor sees their holdings, current value, payouts, returns (XIRR), project updates,
 statements (PDF) and shared documents.
 
@@ -61,7 +66,7 @@ into vector geometry by `scripts/brand/build_brand.py`, which writes `frontend/s
 - `backend/core.py` – database, sessions, roles and permissions (`PERMS`, `OWN_SCOPE`, `require()`, `scope()`), audit, notifications, email, uploads.
 - `backend/logic.py` – pure business rules (commission, invoice/GST, short-stay split, owner statement, workflows). Unit-tested.
 - `backend/routes_*.py` – `auth` (sign-in, 2-step, users), `public` (website, enquiries, brochures, link previews), `crm`, `props`, `deals`, `finance`, `ops` (leases, statements, maintenance, bookings), `admin` (dashboard, calendar, reports, documents, tasks, approvals, settings, audit), `content` (Insights), `portal` (owner portal), `branches` (branches, places, team chart), `customers`, `channels` (short-stay platforms, iCal sync, pricing, stay requests), `investors` (incl. investor dashboard), `agreements`, `cms` (website editor), `ceo` (health score and report), `seo` (server-rendered pages, sitemap, robots, llms.txt), `tickets` (service requests),
-`bills` (tenant bills and payment notices), `tenant` and `buyer` (portals), `vault` (password vault).
+`bills` (tenant bills and payment notices), `tenant` and `buyer` (portals), `vault` (password vault), `ai` (AI agents and the MCP endpoint).
 - `backend/agreements.py` – agreement templates and Word / PDF rendering in stamp-paper layout; `backend/ical.py` – calendar files.
 - `backend/pdf.py` – branded PDFs (invoices, receipts, rent receipts, statements, deal summaries, brochures).
 - `frontend/src/pages/public`, `pages/erp`, `pages/owner` – screens; `lib/` – API client, sign-in, dialogs, calculators, Markdown.
@@ -89,6 +94,8 @@ into vector geometry by `scripts/brand/build_brand.py`, which writes `frontend/s
 Password vault: Super Administrator and Director see every login; Branch Manager, Accountant, Marketing and Short-Stay
 Operations can add logins; Sales and Property Managers can use logins shared with them; the Auditor and customers never
 see the vault.
+
+AI agents & MCP: Super Administrator and Director manage agents; the Auditor can view them and their activity.
 
 Staff with branches on their account see only those branches' records; directors and super administrators see every
 branch and can narrow the view with the branch picker (sent as the `X-Branch` header). Records outside a user's scope return 404; refused actions return 403 and are audit-logged. Approvals (commission change
