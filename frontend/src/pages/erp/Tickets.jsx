@@ -89,7 +89,7 @@ export function TicketDesk() {
   const wa = waLink(phone, `Hello ${t.customer?.name || ""}, this is about your request ${t.code}.`);
   return (
     <div className="space-y-5" data-testid="ticket-desk">
-      <Link to="/erp/tickets" className="text-xs text-slate-500 hover:underline">← Service requests</Link>
+      <Link to="/erp/tickets" className="tap text-xs text-slate-500 hover:underline">← Service requests</Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0"><p className="eyebrow">{t.code} · {t.category_label}</p><h1 className="mt-1 font-heading text-2xl font-semibold" data-testid="ticket-title">{t.title}</h1>
           <p className="mt-1 text-sm text-slate-500">{ROLE_TEXT[t.raised_by?.role]} {t.raised_by?.name} · {label(t.channel)} · {fmtDateTime(t.created_at)}</p></div>
@@ -134,7 +134,7 @@ export function TicketDesk() {
           </Section>
           {t.work_order && <Section title={`Work order ${t.work_order.code}`} testid="ticket-wo">
             <Facts items={[["Status", <Badge v={t.work_order.status} />], ["Vendor", vendors.find?.((v) => v.id === t.work_order.vendor_id)?.name], ["Quote", t.work_order.quote_amount != null ? inr(t.work_order.quote_amount) : "-"], ["Cost", t.work_order.actual_cost != null ? inr(t.work_order.actual_cost) : "-"], ["Charged to", label(t.work_order.charge_to)], ["Due", fmtDate(t.work_order.due_date)]]} cols="grid-cols-2" />
-            <Link to="/erp/maintenance" className="mt-3 inline-block text-xs underline">Open maintenance</Link>
+            <Link to="/erp/maintenance" className="tap mt-3 inline-block text-xs underline">Open maintenance</Link>
             <p className="mt-2 text-xs text-slate-500">When the work order is completed, this request is marked resolved and the customer is asked to rate it.</p>
           </Section>}
         </div>

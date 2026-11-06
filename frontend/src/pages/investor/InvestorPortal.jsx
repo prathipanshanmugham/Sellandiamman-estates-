@@ -62,10 +62,10 @@ export function InvestorOverview() {
         ))}</div>
       </Section>
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <Section title="Latest payouts" actions={<Link to="/investor/payouts" className="text-xs underline">All payouts</Link>}><DataTable rows={d.recent_payouts} columns={[{ key: "date", label: "Date", render: (x) => fmtDate(x.date) }, { key: "project_name", label: "Project" }, { key: "period", label: "Period" }, { key: "net", label: "Paid to you", render: (x) => inr(x.net) }]} empty="No payouts yet." /></Section>
+        <Section title="Latest payouts" actions={<Link to="/investor/payouts" className="tap text-xs underline">All payouts</Link>}><DataTable rows={d.recent_payouts} columns={[{ key: "date", label: "Date", render: (x) => fmtDate(x.date) }, { key: "project_name", label: "Project" }, { key: "period", label: "Period" }, { key: "net", label: "Paid to you", render: (x) => inr(x.net) }]} empty="No payouts yet." /></Section>
         <div className="space-y-6">
           <Rm rm={d.rm} />
-          <Section title="Project news" actions={<Link to="/investor/updates" className="text-xs underline">All updates</Link>}>{d.updates.length ? <ul className="space-y-3 text-sm">{d.updates.slice(0, 3).map((u) => <li key={u.id}><p className="font-medium">{u.title}</p><p className="text-xs text-slate-500">{u.project_name} · {fmtDate(u.at)}</p></li>)}</ul> : <p className="text-sm text-slate-400">No updates yet.</p>}</Section>
+          <Section title="Project news" actions={<Link to="/investor/updates" className="tap text-xs underline">All updates</Link>}>{d.updates.length ? <ul className="space-y-3 text-sm">{d.updates.slice(0, 3).map((u) => <li key={u.id}><p className="font-medium">{u.title}</p><p className="text-xs text-slate-500">{u.project_name} · {fmtDate(u.at)}</p></li>)}</ul> : <p className="text-sm text-slate-400">No updates yet.</p>}</Section>
         </div>
       </div>
     </div>

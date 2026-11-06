@@ -84,9 +84,9 @@ export default function Catalogue() {
               <button className="btn-line btn-sm lg:hidden" onClick={() => setSheet(true)} data-testid="open-filters-btn"><SlidersHorizontal size={14} />Filters{active.length ? ` (${active.length})` : ""}</button>
               <p className="text-sm text-slate-600" data-testid="catalogue-count" aria-live="polite">{loading ? "Loading…" : `${data.total} ${data.total === 1 ? "property" : "properties"}`}</p>
             </div>
-            <div className="flex items-center gap-2">
-              <select className="inp !w-auto !py-1.5" value={params.get("sort") || "latest"} onChange={(e) => setParam("sort", e.target.value)} aria-label="Sort" data-testid="sort-select"><option value="latest">Latest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option><option value="area_desc">Largest area</option></select>
-              {[["grid", LayoutGrid, "Grid view"], ["list", List, "List view"], ["map", MapIcon, "Map view"]].map(([v, I, l]) => <button key={v} className={`btn-line btn-sm ${view === v ? "!border-slate-900 !bg-slate-900 !text-white" : ""}`} onClick={() => changeView(v)} aria-label={l} aria-pressed={view === v} data-testid={`view-${v}-btn`}><I size={14} /></button>)}
+            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+              <select className="inp min-w-0 flex-1 !py-1.5 sm:!w-auto sm:flex-none" value={params.get("sort") || "latest"} onChange={(e) => setParam("sort", e.target.value)} aria-label="Sort" data-testid="sort-select"><option value="latest">Latest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option><option value="area_desc">Largest area</option></select>
+              {[["grid", LayoutGrid, "Grid view"], ["list", List, "List view"], ["map", MapIcon, "Map view"]].map(([v, I, l]) => <button key={v} className={`btn-line btn-sm shrink-0 !px-2.5 ${view === v ? "!border-slate-900 !bg-slate-900 !text-white" : ""}`} onClick={() => changeView(v)} aria-label={l} aria-pressed={view === v} data-testid={`view-${v}-btn`}><I size={14} /></button>)}
             </div>
           </div>
           {params.get("city") && <p className="mb-3 text-xs text-slate-500">Guide to this area: <Link to={placeUrl(params.get("city"), params.get("locality"))} className="underline" data-testid="place-guide-link">Property in {params.get("locality") ? `${params.get("locality")}, ` : ""}{params.get("city")}</Link></p>}

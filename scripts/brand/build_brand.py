@@ -442,10 +442,11 @@ def main():
             w = 1200 if name == "horizontal" else 900
             h = round(w * lay["h"] / lay["w"])
             jobs.append((sized(svg_doc(C, lay, tone), w, h), w, h, brand / f"logo-{name}{suffix}.png", True))
-    # Home-screen / app icons: the mark on white. iOS rounds the corners itself; the maskable icon keeps the mark
-    # inside the safe circle so Android can cut any shape.
-    for size, out, fill, radius in ((180, "apple-touch-icon.png", 0.74, 0), (192, "icon-192.png", 0.76, 0.22),
-                                    (512, "icon-512.png", 0.76, 0.22), (512, "icon-maskable-512.png", 0.62, 0)):
+    # Home-screen / app icons: the mark on solid white, edge to edge (no see-through corners, which some phone
+    # launchers fill with black). iOS and Android round or cut the shape themselves; the maskable icon keeps the
+    # mark inside the safe circle so Android can cut any shape.
+    for size, out, fill, radius in ((180, "apple-touch-icon.png", 0.74, 0), (192, "icon-192.png", 0.72, 0),
+                                    (512, "icon-512.png", 0.72, 0), (512, "icon-maskable-512.png", 0.62, 0)):
         jobs.append((icon_svg(C, size, fill, radius, bg=WHITE), size, size, PUBLIC / out, True))
     for size in (16, 32, 48):
         jobs.append((icon_svg(C, size, 1.0), size, size, brand / f".fav{size}.png", True))

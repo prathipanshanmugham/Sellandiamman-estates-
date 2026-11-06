@@ -34,7 +34,7 @@ import routes_ai
 from seed import seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-APP_VERSION = "2026.11.2"
+APP_VERSION = "2026.11.3"
 app = FastAPI(title="Sellandiamman Estates API", version=APP_VERSION, docs_url="/api/docs",
               openapi_url="/api/openapi.json")
 

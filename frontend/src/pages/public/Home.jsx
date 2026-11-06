@@ -30,7 +30,7 @@ function Heading({ s, fallback, dark, link, linkLabel = "View all" }) {
   return (
     <div className="mb-8 flex items-end justify-between gap-4">
       <div>{s.eyebrow && <p className={`eyebrow ${dark ? "!text-slate-400" : ""}`}>{s.eyebrow}</p>}<h2 className={`font-heading text-2xl font-semibold sm:text-3xl ${s.eyebrow ? "mt-3" : ""}`}>{s.title || fallback}</h2>{s.subtitle && <p className={`mt-2 max-w-2xl text-sm ${dark ? "text-slate-400" : "text-slate-600"}`}>{s.subtitle}</p>}</div>
-      {link && <Link to={link} className={`flex shrink-0 items-center gap-1 text-sm font-medium ${dark ? "text-slate-300 hover:text-white" : "text-slate-700 hover:text-slate-900"}`}>{linkLabel} <ArrowRight size={14} /></Link>}
+      {link && <Link to={link} className={`flex min-h-[36px] shrink-0 items-center gap-1 text-sm font-medium ${dark ? "text-slate-300 hover:text-white" : "text-slate-700 hover:text-slate-900"}`}>{linkLabel} <ArrowRight size={14} /></Link>}
     </div>
   );
 }

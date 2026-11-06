@@ -76,7 +76,7 @@ export default function Places() {
             </div>
             {t.intro && <p className="mt-2 text-sm text-slate-600">{t.intro}</p>}
             <ul className="mt-3 flex flex-wrap gap-1.5">{t.localities.map((l) => <li key={l.id} className={`group flex items-center gap-1 border px-2 py-1 text-xs ${l.active === false ? "border-dashed border-slate-300 text-slate-400" : "border-slate-200"}`}>{l.name}{l.listings > 0 && <span className="text-slate-400">{l.listings}</span>}{sw && <><button className="hidden text-slate-400 hover:text-slate-900 group-hover:inline" onClick={() => intro({ ...l, city: t.name })} aria-label={`Introduction for ${l.name}`}><Pencil size={10} /></button><button className="hidden text-slate-400 hover:text-slate-900 group-hover:inline" onClick={() => editLoc(l, { active: l.active === false }, l.active === false ? "Shown" : "Hidden")} aria-label={l.active === false ? `Show ${l.name}` : `Hide ${l.name}`}>{l.active === false ? <Eye size={10} /> : <EyeOff size={10} />}</button></>}</li>)}
-              {pw && <li><button className="flex items-center gap-1 border border-dashed border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-slate-500" onClick={() => addLocality(t)} data-testid={`add-locality-${t.slug}`}><Plus size={11} />Add locality</button></li>}</ul>
+              {pw && <li><button className="flex min-h-[36px] items-center gap-1 border border-dashed border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-slate-500 sm:min-h-0" onClick={() => addLocality(t)} data-testid={`add-locality-${t.slug}`}><Plus size={11} />Add locality</button></li>}</ul>
           </div>
         ))}</div>}
       </Section>

@@ -117,15 +117,16 @@ export function Section({ title, children, actions, testid }) {
 
 // From / to dates in one compact row (fits a phone).
 export function DateRange({ frm, to, onChange, ids = ["from", "to"] }) {
+  const cls = "inp w-full min-w-0 !px-2 !py-1.5 sm:!w-[9.75rem]";
   return (
-    <div className="flex w-full items-center gap-1.5 text-xs text-slate-500 sm:w-auto">
-      <input type="date" className="inp min-w-0 flex-1 !px-2 !py-1.5 sm:!w-[9.75rem] sm:flex-none" value={frm} max={to || undefined} onChange={(e) => onChange({ frm: e.target.value, to })} aria-label="From date" data-testid={ids[0]} />
-      <span aria-hidden="true">to</span>
-      <input type="date" className="inp min-w-0 flex-1 !px-2 !py-1.5 sm:!w-[9.75rem] sm:flex-none" value={to} min={frm || undefined} onChange={(e) => onChange({ frm, to: e.target.value })} aria-label="To date" data-testid={ids[1]} />
+    <div className="grid w-full grid-cols-2 gap-2 text-xs text-slate-500 sm:flex sm:w-auto sm:items-center sm:gap-1.5">
+      <label className="min-w-0"><span className="mb-1 block sm:hidden">From</span><input type="date" className={cls} value={frm} max={to || undefined} onChange={(e) => onChange({ frm: e.target.value, to })} aria-label="From date" data-testid={ids[0]} /></label>
+      <span className="hidden sm:inline" aria-hidden="true">to</span>
+      <label className="min-w-0"><span className="mb-1 block sm:hidden">To</span><input type="date" className={cls} value={to} min={frm || undefined} onChange={(e) => onChange({ frm, to: e.target.value })} aria-label="To date" data-testid={ids[1]} /></label>
     </div>
   );
 }
 
 export function Facts({ items, cols = "grid-cols-2 sm:grid-cols-3" }) {
-  return <dl className={`grid gap-x-6 gap-y-3 ${cols}`}>{items.filter(Boolean).map(([k, v]) => <div key={k}><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt><dd className="mt-0.5 break-words text-sm text-slate-800">{v ?? "-"}</dd></div>)}</dl>;
+  return <dl className={`facts grid gap-x-6 gap-y-3 ${cols}`}>{items.filter(Boolean).map(([k, v]) => <div key={k}><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{k}</dt><dd className="mt-0.5 break-words text-sm text-slate-800">{v ?? "-"}</dd></div>)}</dl>;
 }

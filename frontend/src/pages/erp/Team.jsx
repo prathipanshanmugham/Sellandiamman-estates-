@@ -30,7 +30,7 @@ function Node({ p, kids, branchName, highlight }) {
         <Avatar p={p} />
         <p className="mt-2 text-sm font-semibold leading-tight text-slate-900">{p.name}</p>
         <p className="text-[11px] leading-tight text-slate-600">{p.designation || p.role_label}</p>
-        <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-400">{branchName(p)}</p>
+        <p className="mt-1 text-[10.5px] uppercase tracking-wider text-slate-400">{branchName(p)}</p>
         <div className="mt-1"><Contacts p={p} small /></div>
       </div>
       {children.length > 0 && <ul>{children.map((c) => <Node key={c.id} p={c} kids={kids} branchName={branchName} highlight={highlight} />)}</ul>}

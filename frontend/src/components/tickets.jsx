@@ -43,7 +43,7 @@ export function Thread({ messages, staffView = false }) {
           <li key={m.id} className={`flex ${right ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] border px-3 py-2 text-sm ${m.internal ? "border-amber-200 bg-amber-50" : right ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white"}`}>
               <p className="whitespace-pre-wrap break-words">{m.text}</p>
-              <p className={`mt-1 text-[10px] ${right && !m.internal ? "text-slate-300" : "text-slate-400"}`}>{m.internal ? "Internal note · " : ""}{m.by}{ours && !staffView ? " (Sellandiamman)" : ""} · {fmtDateTime(m.at)}</p>
+              <p className={`mt-1 text-[11px] ${right && !m.internal ? "text-slate-300" : "text-slate-400"}`}>{m.internal ? "Internal note · " : ""}{m.by}{ours && !staffView ? " (Sellandiamman)" : ""} · {fmtDateTime(m.at)}</p>
             </div>
           </li>
         );

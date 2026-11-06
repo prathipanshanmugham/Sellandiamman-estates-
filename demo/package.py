@@ -55,7 +55,7 @@ for f in ("favicon.svg", "icon-192.png"):
 
 BOOT_MARK = (SITE / "brand/mark.svg").read_text().replace("<svg ", '<svg width="48" height="20" aria-hidden="true" ', 1).replace('role="img" ', "")
 page = f"""<title>Sellandiamman Estates</title>
-<meta name="theme-color" content="#0F172A">
+<meta name="theme-color" content="#FFFFFF">
 <meta name="description" content="Preview of the Sellandiamman Estates website, staff workspace and owner portal with sample data.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="{css}">

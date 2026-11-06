@@ -114,7 +114,7 @@ export function TenantOverview() {
         <Kpi title="Bills due" value={inr(d.bills_total, true)} hint={`${d.bills_due.length} bill${d.bills_due.length === 1 ? "" : "s"} (EB, water…)`} testid="tenant-kpi-bills" />
         <Kpi title="Open requests" value={d.open_requests} hint={d.pending_notices ? `${d.pending_notices} payment${d.pending_notices > 1 ? "s" : ""} waiting for our check` : "Repairs, cleaning, documents"} testid="tenant-kpi-requests" />
       </div>
-      {d.bills_due.length > 0 && <Section title="Bills to pay" actions={<Link to="/tenant/bills" className="text-xs underline">All bills</Link>}>
+      {d.bills_due.length > 0 && <Section title="Bills to pay" actions={<Link to="/tenant/bills" className="tap text-xs underline">All bills</Link>}>
         <div className="divide-y divide-slate-100" data-testid="tenant-bills-due">{d.bills_due.map((b) => { const I = KIND_ICON[b.kind] || Receipt; return (
           <div key={b.id} className="flex items-start justify-between gap-3 py-3 sm:items-center">
             <div className="flex min-w-0 items-start gap-3"><I size={18} className="mt-0.5 shrink-0 text-slate-400" /><div className="min-w-0"><p className="font-medium">{b.label}</p><p className="text-xs text-slate-500">Due {fmtDate(b.due_date)}{b.overdue ? " · overdue" : ""}{b.mode === "direct" ? " · pay the provider directly" : ""}</p></div></div>

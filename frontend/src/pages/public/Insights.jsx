@@ -54,7 +54,7 @@ export function Article() {
   if (!p) return <div className="container-x py-24 text-sm text-slate-500">Loading…</div>;
   return (
     <article className="container-x py-10 sm:py-14" data-testid="article-page">
-      <nav className="text-xs text-slate-500" aria-label="Breadcrumb"><Link to="/insights" className="hover:underline">Insights</Link> / <Link to={`/insights?category=${p.category}`} className="hover:underline">{label(p.category)}</Link></nav>
+      <nav className="text-xs leading-8 text-slate-500 sm:leading-normal" aria-label="Breadcrumb"><Link to="/insights" className="hover:underline">Insights</Link> / <Link to={`/insights?category=${p.category}`} className="hover:underline">{label(p.category)}</Link></nav>
       <header className="mt-4 max-w-3xl">
         <h1 className="font-heading text-3xl font-semibold leading-tight sm:text-5xl">{p.title}</h1>
         {p.excerpt && <p className="mt-4 text-lg text-slate-600">{p.excerpt}</p>}

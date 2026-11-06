@@ -35,7 +35,8 @@
   :focus-visible { outline: 2px solid #0f172a; outline-offset: 2px; }
   .tabular { font-variant-numeric: tabular-nums; }
   /* Phones: 16px inputs stop iOS from zooming into the field */
-  @media (max-width: 640px) { input, select, textarea { font-size: 16px !important; } }
+  /* 16px text in fields stops phones (also turned sideways, and tablets) from zooming in when a field is tapped */
+  @media (max-width: 640px), (pointer: coarse) { input, select, textarea { font-size: 16px !important; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 }
 
@@ -71,7 +72,7 @@
 /* Phone layout for data tables: each row becomes a compact card. Fields sit two to a row with the label above the
    value. Columns can opt into a role with `m` (see DataTable): "top" (small reference line), "badge" (status, top
    right), "title" (bold headline, full width), "wide" (full width field), "hide" (not shown on phones). */
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .tbl-cards thead { display: none; }
   .tbl-cards, .tbl-cards tbody { display: block; width: 100%; }
   .tbl-cards tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 14px; border-bottom: 1px solid #e2e8f0; padding: 14px; }
@@ -91,6 +92,17 @@
   .tbl-cards td.empty-cell::before { content: none; }
   .tbl-cards tr:has(> td.empty-cell) { display: block; }
 }
+/* Tablets (no side menu yet): the cards sit two across */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .tbl-cards tbody { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .tbl-cards tr:nth-child(odd) { border-right: 1px solid #e2e8f0; }
+  .tbl-cards tr:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
+  .tbl-cards tr:has(> td.empty-cell) { grid-column: 1 / -1; border-right: 0; }
+}
+/* Wide screens: codes and status chips stay on one line */
+@media (min-width: 1024px) {
+  .tbl-cards td[data-m="top"], .tbl-cards td[data-m="badge"] { white-space: nowrap; }
+}
 
 /* Phones: filter rows become a tidy two-column grid (search and checkboxes take the full width) */
 @media (max-width: 639px) {
@@ -104,6 +116,16 @@
 }
 .chip-row::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+
+/* Phones: everything you tap is at least 36 px high */
+@media (max-width: 639px) {
+  .btn-sm, .chip { min-height: 36px; }
+  .btn-sm:has(> svg:only-child) { min-width: 36px; }
+  .tap { display: inline-flex; align-items: center; min-height: 36px; }
+  /* text links that stand alone on a line (breadcrumbs, record links in details, phone and email): a taller touch area
+     without moving the text */
+  nav[aria-label="Breadcrumb"] a, .facts a, .contact-links a, .ticket-meta a { padding-top: 9px; padding-bottom: 9px; }
+}
 
 /* Room for the phone tab bar and the iPhone home indicator */
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }

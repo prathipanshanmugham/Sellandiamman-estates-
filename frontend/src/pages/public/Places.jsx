@@ -55,7 +55,7 @@ export default function PlacePage() {
   const others = town.localities.filter((l) => l.listings && l.id !== loc?.id);
   return (
     <div className="container-x py-10 sm:py-12" data-testid="place-page">
-      <nav className="text-xs text-slate-500" aria-label="Breadcrumb"><Link to="/" className="hover:underline">Home</Link> / <Link to={placeUrl(town.name)} className="hover:underline">{town.name}</Link>{loc && <> / {loc.name}</>}</nav>
+      <nav className="text-xs leading-8 text-slate-500 sm:leading-normal" aria-label="Breadcrumb"><Link to="/" className="hover:underline">Home</Link> / <Link to={placeUrl(town.name)} className="hover:underline">{town.name}</Link>{loc && <> / {loc.name}</>}</nav>
       <div className="mt-4 grid gap-8 lg:grid-cols-[1.4fr_1fr]">
         <div>
           <p className="eyebrow flex items-center gap-1"><MapPin size={12} />{town.district ? `${town.district} district, ` : ""}Tamil Nadu</p>

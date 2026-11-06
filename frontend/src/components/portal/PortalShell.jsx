@@ -26,12 +26,12 @@ export function PortalShell({ kind, home, title, tabs, footer }) {
   const bar = tabs.length > 5 ? tabs.slice(0, 4) : tabs;
   const rest = tabs.length > 5 ? tabs.slice(4) : [];
   const restActive = rest.some(([to]) => loc.pathname.startsWith(to));
-  const tabCls = (on) => `relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-1 pt-0.5 text-[11px] leading-tight ${on ? "font-semibold text-slate-900" : "text-slate-500"}`;
+  const tabCls = (on) => `relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 pt-0.5 text-[10.5px] leading-tight tracking-tight min-[360px]:text-[11px] min-[360px]:tracking-normal ${on ? "font-semibold text-slate-900" : "text-slate-500"}`;
   return (
     <div className="min-h-screen bg-slate-50" data-testid={`${kind}-portal`}>
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-4 sm:px-6">
-          <Link to={home} aria-label={`${title} home`} className="min-w-0"><Logo size="sm" /></Link>
+          <Link to={home} aria-label={`${title} home`} className="flex min-h-[40px] min-w-0 items-center"><Logo size="sm" /></Link>
           <div className="flex shrink-0 items-center gap-1 text-sm sm:gap-3">
             <span className="hidden text-slate-600 md:inline" data-testid={`${kind}-name`}>{user.name}</span>
             <Notifications />

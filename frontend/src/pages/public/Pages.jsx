@@ -31,7 +31,7 @@ export function ServiceDetail() {
   return (
     <div className="container-x grid gap-14 py-14 lg:grid-cols-[1.4fr_1fr]" data-testid={`service-page-${slug}`}>
       <div>
-        <Link to="/services" className="text-xs text-slate-500 hover:underline">← All services</Link>
+        <Link to="/services" className="tap text-xs text-slate-500 hover:underline">← All services</Link>
         <h1 className="mt-3 font-heading text-4xl font-semibold sm:text-5xl">{s.title}</h1>
         <p className="mt-5 text-base text-slate-600 md:text-lg">{s.summary}</p>
         <ul className="mt-10 space-y-4">{s.points.map((p) => <li key={p} className="flex gap-3 border-b border-slate-100 pb-4 text-sm text-slate-700"><Check size={16} className="mt-0.5 shrink-0" />{p}</li>)}</ul>
@@ -69,7 +69,7 @@ export function Contact() {
       {site.content.contact_intro && <p className="mt-3 max-w-2xl text-slate-600">{site.content.contact_intro}</p>}
       {site.branches.length > 0 && <div className="mt-10 grid gap-6 lg:grid-cols-[1.4fr_1fr]" data-testid="contact-branches"><BranchCards branches={site.branches} phone={site.phone} whatsapp={site.whatsapp} compact />{pins.length > 0 && <PropertyMap items={pins} height={360} />}</div>}
       <div className="mt-10 grid gap-10 lg:grid-cols-3">
-        <div className="space-y-4 text-sm text-slate-700" data-testid="contact-details"><p><span className="eyebrow block">Office</span>{site.address}</p><p><span className="eyebrow block">Phone</span><a href={telLink(site.phone)} className="hover:underline">{site.phone}</a></p><p><span className="eyebrow block">Email</span><a href={`mailto:${site.email}`} className="break-all hover:underline">{site.email}</a></p><p><span className="eyebrow block">Hours</span>{site.office_hours}</p><p className="border-t border-slate-200 pt-4"><span className="eyebrow block">Looking for something specific?</span><Link to="/requirement" className="font-medium underline">Post your requirement</Link> and we will match it with new listings.</p></div>
+        <div className="contact-links space-y-4 text-sm text-slate-700" data-testid="contact-details"><p><span className="eyebrow block">Office</span>{site.address}</p><p><span className="eyebrow block">Phone</span><a href={telLink(site.phone)} className="hover:underline">{site.phone}</a></p><p><span className="eyebrow block">Email</span><a href={`mailto:${site.email}`} className="break-all hover:underline">{site.email}</a></p><p><span className="eyebrow block">Hours</span>{site.office_hours}</p><p className="border-t border-slate-200 pt-4"><span className="eyebrow block">Looking for something specific?</span><Link to="/requirement" className="font-medium underline">Post your requirement</Link> and we will match it with new listings.</p></div>
         <div className="border border-slate-200 p-6"><EnquiryForm kind="callback" title="Request a callback" testid="callback" /></div>
         <div className="border border-slate-200 p-6"><EnquiryForm kind="management" defaultInterest="management" showInterest={false} title="Property management enquiry" testid="management" /></div>
       </div>

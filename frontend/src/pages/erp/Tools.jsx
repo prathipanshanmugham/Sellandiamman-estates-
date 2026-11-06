@@ -58,7 +58,7 @@ function EmiCalc() {
         <Result label="Total interest" value={inr0(a.totalInterest)} />
         <Result label="Total paid over the loan" value={inr0(a.totalPaid)} />
         <Split a={Number(v.amount)} b={a.totalInterest} la="Principal" lb="Interest" />
-        <button className="mt-4 text-sm font-medium underline" onClick={() => setOpen(!open)} aria-expanded={open} data-testid="emi-schedule-toggle">{open ? "Hide" : "Show"} year-by-year schedule</button>
+        <button className="tap mt-4 text-sm font-medium underline" onClick={() => setOpen(!open)} aria-expanded={open} data-testid="emi-schedule-toggle">{open ? "Hide" : "Show"} year-by-year schedule</button>
         {open && <div className="mt-3 max-h-72 overflow-auto"><table className="tbl w-full"><thead><tr><th>Year</th><th className="!text-right">Principal</th><th className="!text-right">Interest</th><th className="!text-right">Balance</th></tr></thead><tbody>{a.years.map((y) => <tr key={y.year}><td>{y.year}</td><td className="text-right tabular">{inr0(y.principal)}</td><td className="text-right tabular">{inr0(y.interest)}</td><td className="text-right tabular">{inr0(y.balance)}</td></tr>)}</tbody></table></div>}
       </div>
     </Block>

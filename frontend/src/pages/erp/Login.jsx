@@ -27,7 +27,7 @@ export function Shell({ title, children, kind = "staff" }) {
       <div className="relative hidden lg:block"><img src={asset(k.img)} alt="" className="absolute inset-0 h-full w-full object-cover" /><div className="absolute inset-0 bg-slate-900/70" />
         <div className="relative flex h-full flex-col justify-between p-10"><Link to="/" aria-label="Sellandiamman Estates home"><Logo tone="dark" size="lg" /></Link><p className="max-w-md font-heading text-3xl text-white" data-testid="login-aside">{k.aside}</p></div>
       </div>
-      <div className="flex items-center justify-center p-6"><div className="w-full max-w-sm"><div className="lg:hidden"><Link to="/" aria-label="Sellandiamman Estates home"><Logo /></Link></div><h1 className="mt-8 font-heading text-2xl font-semibold" data-testid="login-title">{title}</h1>{children}<Link to="/" className="mt-8 block text-xs text-slate-500 hover:underline">← Back to website</Link></div></div>
+      <div className="flex items-center justify-center p-6"><div className="w-full max-w-sm"><div className="lg:hidden"><Link to="/" aria-label="Sellandiamman Estates home"><Logo /></Link></div><h1 className="mt-8 font-heading text-2xl font-semibold" data-testid="login-title">{title}</h1>{children}<Link to="/" className="tap mt-6 text-xs text-slate-500 hover:underline">← Back to website</Link></div></div>
     </div>
   );
 }
@@ -72,11 +72,11 @@ export function Login({ kind = "staff" }) {
         {sent && <p className="text-sm text-emerald-700" data-testid="forgot-success">{sent}</p>}
         <button className="btn-dark w-full" disabled={st.busy} data-testid="login-submit-btn">{st.busy ? "Please wait…" : { login: "Sign in", forgot: "Send reset link", mfa: "Verify" }[mode]}</button>
         {mode !== "mfa"
-          ? <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => { setMode(mode === "forgot" ? "login" : "forgot"); setSent(""); setSt({ busy: false, err: "" }); }} data-testid="forgot-toggle">{mode === "forgot" ? "Back to sign in" : "Forgot password?"}</button>
+          ? <button type="button" className="tap text-xs text-slate-500 hover:underline" onClick={() => { setMode(mode === "forgot" ? "login" : "forgot"); setSent(""); setSt({ busy: false, err: "" }); }} data-testid="forgot-toggle">{mode === "forgot" ? "Back to sign in" : "Forgot password?"}</button>
           : <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => { setMode("login"); setSt({ busy: false, err: "" }); }}>Use a different account</button>}
         <p className="text-xs text-slate-400">{k.note} There is no public sign-up.</p>
-        {kind === "staff" ? <Link to="/login" className="block text-xs text-slate-500 underline" data-testid="customer-login-link">Customer login</Link>
-          : <Link to="/login" className="block text-xs text-slate-500 underline" data-testid="other-login-link">Not a {kind === "owner" ? "property owner" : kind}? Choose another login</Link>}
+        {kind === "staff" ? <Link to="/login" className="tap block text-xs text-slate-500 underline" data-testid="customer-login-link">Customer login</Link>
+          : <Link to="/login" className="tap block text-xs text-slate-500 underline" data-testid="other-login-link">Not a {kind === "owner" ? "property owner" : kind}? Choose another login</Link>}
       </form>
     </Shell>
   );

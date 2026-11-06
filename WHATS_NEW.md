@@ -1,3 +1,22 @@
+# What's new – 6 Nov 2026
+
+## Home-screen app all white
+- The installed web app (Add to Home Screen / Install app) is white throughout: the SA mark on a solid white icon with
+  no see-through corners, a white top bar and a white start-up screen. The browser bar on Android phones is white too.
+- Icon links carry `?v=3`, so Android picks up the new icon by itself within a day or so. On an iPhone, remove the
+  saved icon and add it to the home screen again.
+
+## Every screen fits every phone
+- Checked every page of the website, staff app and the four portals at 320, 360, 375, 390 and 414 px wide, turned
+  sideways (667 px), on a tablet (768 px) and at 1024 px: nothing scrolls sideways or gets cut off.
+- Property list: sort and grid / list / map buttons fit on the smallest phones.
+- Lists in the staff app show as cards up to tablet width, two across on tablets.
+- Everything you tap is at least 36 px high on phones (small buttons, chips, "All bills"-style links, breadcrumbs,
+  back links, copy / show buttons in the vault, editor toolbars).
+- Portal tab bar labels fit five across on small phones; From / To dates sit side by side with labels.
+- Text in fields is 16 px on every touch screen, so phones don't zoom in when a field is tapped (also sideways and
+  on tablets). Small print raised to at least 10.5 px.
+
 # What's new – Round 6 (5 Nov 2026)
 
 ## AI agents & MCP

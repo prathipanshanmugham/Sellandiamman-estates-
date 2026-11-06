@@ -44,7 +44,7 @@ export default function ErpLayout() {
       <div className="flex items-center justify-between border-b border-slate-800 px-5 py-5"><Link to="/erp" aria-label="Dashboard"><Logo tone="dark" size="sm" /></Link><button className="p-1 text-slate-400 lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
       <div className="px-5 pt-3 lg:hidden"><BranchPicker user={user} className="w-full !border-slate-700 !bg-slate-800 !text-slate-200" /></div>
       <div className="flex-1 overflow-y-auto overscroll-contain py-2">
-        {groups.map(([g, items]) => <div key={g} className="py-2"><p className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{g}</p>
+        {groups.map(([g, items]) => <div key={g} className="py-2"><p className="px-5 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500">{g}</p>
           {items.map(([to, l, Icon]) => <NavLink key={to} to={to} end={to === "/erp"} data-testid={`erp-nav-${l.split(" ")[0].toLowerCase()}`} className={({ isActive }) => `flex items-center gap-3 px-5 py-2.5 text-sm transition-colors lg:py-2 ${isActive ? "bg-slate-800 text-white" : "hover:bg-slate-800/60 hover:text-white"}`}><Icon size={16} />{l}</NavLink>)}
         </div>)}
       </div>
